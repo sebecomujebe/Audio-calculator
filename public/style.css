@@ -827,3 +827,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .price-product-link:hover {
   text-decoration-thickness: 2px;
 }
+
+
+/* v0.94 – tři režimy rozmístění */
+#placementOptimization {
+  width: 100%;
+}
