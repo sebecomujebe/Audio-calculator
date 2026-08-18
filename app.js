@@ -757,6 +757,15 @@ function updateHeatmapScaleLabels(heatmap) {
   high.textContent = `${heatmap.max.toFixed(0)} dB`;
 }
 
+let appState = {
+  listenerXFt: null,
+  listenerYFt: null,
+  draggingListener: false,
+  draggingSection: null,
+  sectionGeom: {},
+  latest: null
+};
+
 function calculatePlacements(coverage) {
   const points = [];
   for (let row = 0; row < coverage.rows; row++) {
