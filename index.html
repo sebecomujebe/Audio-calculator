@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.87" />
+  <link rel="stylesheet" href="style.css?v=0.88" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.87</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.88</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -223,13 +223,6 @@
               <div class="eyebrow">PŮDORYS</div>
               <h2>Rozmístění reproduktorů</h2>
             </div>
-            <label class="heatmap-mode-control">
-              <span>Barevná škála</span>
-              <select id="heatmapScaleMode">
-                <option value="absolute" selected>Absolutní SPL</option>
-                <option value="relative">Relativní</option>
-              </select>
-            </label>
           </div>
 
           <div id="floorPlanWrap" class="floor-wrap">
@@ -238,9 +231,9 @@
 
           <div class="heatmap-scale-wrap">
             <div class="heatmap-scale">
-              <span id="heatmapScaleLowLabel">60 dB</span>
+              <span id="heatmapScaleLowLabel">Nižší SPL</span>
               <div class="heatbar"></div>
-              <span id="heatmapScaleHighLabel">110+ dB</span>
+              <span id="heatmapScaleHighLabel">Vyšší SPL</span>
             </div>
           </div>
           <div class="legend">
@@ -329,7 +322,7 @@
               <div class="eyebrow">CENA NÁVRHU</div>
               <h2>Cenové shrnutí</h2>
             </div>
-            <span id="priceDataStatus" class="price-status">Připraveno pro cenový feed</span>
+            <span id="priceDataStatus" class="price-status">Cenový feed zatím není připojen</span>
           </div>
 
           <div class="price-table-wrap">
@@ -358,13 +351,13 @@
           </div>
 
           <p class="price-note" id="priceSummaryNote">
-            Cenová logika je připravena. V další fázi se sem napojí denně aktualizovaný AV Integra feed podle kódu produktu.
+            Kalkulátor je připraven na endpoint /api/prices. Dokud není serverová část nasazená, výpočet funguje normálně bez cen.
           </p>
         </div>
       </section>
     </section>
   </main>
 
-  <script src="app.js?v=0.87"></script>
+  <script src="app.js?v=0.88"></script>
 </body>
 </html>

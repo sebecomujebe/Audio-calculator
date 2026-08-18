@@ -1,4 +1,4 @@
-const APP_VERSION = "0.87";
+const APP_VERSION = "0.88";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -709,24 +709,22 @@ function prepareRenderedHeatmap(heatmap) {
   };
 }
 
-function heatColor(value, min, max, mode = "absolute") {
-  let t;
+function heatColor(value, min, max) {
+  const span = Math.max(0.001, max - min);
 
-  if (mode === "relative") {
-    const span = Math.max(0.001, max - min);
-    t = Math.max(0, Math.min(1, (value - min) / span));
-  } else {
-    // Absolutní SPL stupnice:
-    // cca 60 dB = modrá, 75 dB = tyrkys/zelená,
-    // 85 dB = zelenožlutá, 95 dB = žlutá/oranžová,
-    // 105–110+ dB = červená.
-    const absoluteMin = 60;
-    const absoluteMax = 110;
-    t = Math.max(0, Math.min(1, (value - absoluteMin) / (absoluteMax - absoluteMin)));
-  }
+  // Relativní pozice v konkrétní místnosti:
+  const relativeT = Math.max(0, Math.min(1, (value - min) / span));
 
-  // Klidnější vícebodová barevná škála.
-  // low -> blue -> cyan -> green -> yellow -> orange -> red
+  // Absolutní "síla" návrhu, ale jen jako jemná modulace.
+  // 75 dB = slabší návrh, 100 dB = velmi silný návrh.
+  const absoluteStrength = Math.max(0, Math.min(1, (value - 75) / 25));
+
+  // Hlavní váha zůstává relativní, takže heatmapa pořád dobře ukazuje
+  // rovnoměrnost. Absolutní SPL ale omezuje, jak daleko do červené se
+  // slabší návrh může dostat.
+  const maxReach = 0.58 + 0.42 * absoluteStrength;
+  const t = relativeT * maxReach;
+
   const stops = [
     [0.00, [45, 95, 190]],
     [0.22, [35, 155, 200]],
@@ -751,28 +749,13 @@ function heatColor(value, min, max, mode = "absolute") {
 }
 
 function updateHeatmapScaleLabels(heatmap) {
-  const mode = document.getElementById("heatmapScaleMode")?.value || "absolute";
   const low = document.getElementById("heatmapScaleLowLabel");
   const high = document.getElementById("heatmapScaleHighLabel");
-  if (!low || !high) return;
+  if (!low || !high || !heatmap) return;
 
-  if (mode === "relative" && heatmap) {
-    low.textContent = `${heatmap.min.toFixed(0)} dB`;
-    high.textContent = `${heatmap.max.toFixed(0)} dB`;
-  } else {
-    low.textContent = "60 dB";
-    high.textContent = "110+ dB";
-  }
+  low.textContent = `${heatmap.min.toFixed(0)} dB`;
+  high.textContent = `${heatmap.max.toFixed(0)} dB`;
 }
-
-let appState = {
-  listenerXFt: null,
-  listenerYFt: null,
-  draggingListener: false,
-  draggingSection: null,
-  sectionGeom: {},
-  latest: null
-};
 
 function calculatePlacements(coverage) {
   const points = [];
@@ -823,8 +806,7 @@ function drawFloorPlan({
   const heatCells = heatmap.cells.map(c => {
     const x = ox + c.ix * cellW;
     const y = oy + c.iy * cellH;
-    const scaleMode = document.getElementById("heatmapScaleMode")?.value || "absolute";
-    const color = heatColor(c.spl, heatmap.min, heatmap.max, scaleMode);
+const color = heatColor(c.spl, heatmap.min, heatmap.max);
     return `<rect x="${x}" y="${y}" width="${cellW + 0.7}" height="${cellH + 0.7}"
       fill="${color}" fill-opacity="0.44">
       <title>${c.spl.toFixed(1)} dB</title>
@@ -1343,7 +1325,69 @@ function updateSuitabilityUI(result) {
 }
 
 
+const PRICE_ENDPOINT = "/api/prices";
 const PRICE_DATA = new Map();
+let PRICE_DATA_UPDATED_AT = null;
+let PRICE_DATA_LOAD_STATE = "idle";
+
+async function loadPriceData() {
+  PRICE_DATA_LOAD_STATE = "loading";
+  const statusEl = document.getElementById("priceDataStatus");
+
+  try {
+    const response = await fetch(`${PRICE_ENDPOINT}?_=${Date.now()}`, {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const items = payload?.items || payload?.prices || payload;
+
+    if (!items || typeof items !== "object") {
+      throw new Error("Neplatný formát cenových dat");
+    }
+
+    PRICE_DATA.clear();
+
+    for (const [code, raw] of Object.entries(items)) {
+      if (!code) continue;
+
+      const item = typeof raw === "number"
+        ? { priceVat: raw }
+        : raw;
+
+      const priceVat = Number(item?.priceVat ?? item?.PRICE_VAT ?? item?.price_vat);
+
+      if (Number.isFinite(priceVat)) {
+        PRICE_DATA.set(code, {
+          ...item,
+          priceVat
+        });
+      }
+    }
+
+    PRICE_DATA_UPDATED_AT = payload?.updatedAt || payload?.updated_at || null;
+    PRICE_DATA_LOAD_STATE = PRICE_DATA.size > 0 ? "ready" : "empty";
+
+    if (statusEl) {
+      statusEl.textContent = PRICE_DATA.size > 0
+        ? "Ceny načteny"
+        : "Cenový feed je prázdný";
+    }
+
+    return PRICE_DATA.size > 0;
+  } catch (error) {
+    PRICE_DATA_LOAD_STATE = "unavailable";
+    if (statusEl) {
+      statusEl.textContent = "Cenový feed zatím není připojen";
+      statusEl.title = String(error?.message || error);
+    }
+    return false;
+  }
+}
 
 function formatCzk(value) {
   if (!Number.isFinite(value)) return "—";
@@ -1411,12 +1455,14 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
   if (PRICE_DATA.size > 0) {
     statusEl.textContent = complete ? "Ceny načteny" : "Ceny částečně dostupné";
     noteEl.textContent = complete
-      ? "Ceny jsou uvedeny včetně DPH."
+      ? `Ceny jsou uvedeny včetně DPH${PRICE_DATA_UPDATED_AT ? ` • aktualizace ${PRICE_DATA_UPDATED_AT}` : ""}.`
       : "U některých položek chybí cena nebo kód produktu; celková cena proto není zobrazena.";
   } else {
-    statusEl.textContent = "Připraveno pro cenový feed";
+    statusEl.textContent = PRICE_DATA_LOAD_STATE === "unavailable"
+      ? "Cenový feed zatím není připojen"
+      : "Připraveno pro cenový feed";
     noteEl.textContent =
-      "Položky a množství jsou připravené. V další fázi se ceny doplní z denně aktualizovaného AV Integra feedu podle kódu produktu.";
+      "Kalkulátor je připraven na endpoint /api/prices. Dokud není serverová část nasazená, výpočet funguje normálně bez cen.";
   }
 }
 
@@ -1825,10 +1871,6 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
-document.getElementById("heatmapScaleMode")?.addEventListener("change", () => {
-  if (!appState.latest) return;
-  refreshListenerOnly();
-});
 
 
 ["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride"]
@@ -1920,6 +1962,7 @@ async function initializeApp() {
   populateUseCaseOptions();
   populateCoverageOptions();
   populateSpeakerOverrideOptions();
+  await loadPriceData();
   calculate();
 }
 
