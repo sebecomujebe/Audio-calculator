@@ -805,8 +805,25 @@ input[type="number"]::-webkit-outer-spin-button {
 #roomShape { width: 100%; }
 
 
-/* v0.92 – optimalizace nepravidelných půdorysů */
-#placementOptimizationValue {
-  max-width: 58%;
-  text-align: right;
+
+
+/* v0.93 – přepínač optimalizace a odkazy v cenovém shrnutí */
+.placement-optimization-row {
+  margin-bottom: 6px;
+}
+
+#placementOptimization {
+  width: 100%;
+}
+
+.price-product-link {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.price-product-link:hover {
+  text-decoration-thickness: 2px;
 }

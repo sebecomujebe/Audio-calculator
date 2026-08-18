@@ -1,4 +1,4 @@
-const APP_VERSION = "0.92";
+const APP_VERSION = "0.93";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -1752,6 +1752,23 @@ function getPriceByAvCode(avCode) {
   return item && Number.isFinite(item.priceVat) ? item : null;
 }
 
+
+function getPriceItemUrl(item) {
+  if (!item) return "";
+  const raw = item.url || item.URL || item.productUrl || item.product_url || item.link || "";
+  if (typeof raw !== "string") return "";
+  const url = raw.trim();
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
   const body = document.getElementById("priceSummaryBody");
   const totalEl = document.getElementById("priceGrandTotal");
@@ -1789,9 +1806,13 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
 
     return `
       <tr>
-        <td>${row.name}</td>
+        <td>${
+          getPriceItemUrl(row.priceItem)
+            ? `<a class="price-product-link" href="${escapeHtml(getPriceItemUrl(row.priceItem))}" target="_blank" rel="noopener noreferrer" title="Otevřít produkt na AV Integra">${escapeHtml(row.name)}</a>`
+            : escapeHtml(row.name)
+        }</td>
         <td>${row.qty}×</td>
-        <td>${row.code || "—"}</td>
+        <td>${escapeHtml(row.code || "—")}</td>
         <td>${formatCzk(price)}</td>
         <td>${formatCzk(subtotal)}</td>
       </tr>
@@ -1997,6 +2018,7 @@ function calculate() {
   const tapOverride = document.getElementById("tapOverride")?.value || "auto";
   const ampPriority = document.getElementById("ampPriority")?.value || "balanced";
   const dantePreference = document.getElementById("dantePreference")?.value || "any";
+  const placementOptimizationEnabled = (document.getElementById("placementOptimization")?.value || "on") === "on";
   const pendantHeightM = speakerType === "pendant"
     ? Number(document.getElementById("pendantHeight").value)
     : 0;
@@ -2073,7 +2095,15 @@ function calculate() {
     return;
   }
 
-  const placementOptimization = optimizePlacementsForRoom(basePlacements, room);
+  const placementOptimization = placementOptimizationEnabled
+    ? optimizePlacementsForRoom(basePlacements, room)
+    : {
+        placements: basePlacements.map(p => ({...p})),
+        optimized: false,
+        method: room.shape === "rectangle" ? "Pravidelná mřížka" : "Pravidelné zarovnání",
+        improvementPct: 0,
+        disabled: true
+      };
   const placements = placementOptimization.placements;
   const effectiveCoverage = {...coverage, count: placements.length};
 
@@ -2161,7 +2191,9 @@ function calculate() {
   document.getElementById("layoutValue").textContent =
     room.shape === "rectangle"
       ? `${coverage.columns} × ${coverage.rows}`
-      : placementOptimization.method;
+      : placementOptimization.disabled
+        ? "Pravidelné zarovnání"
+        : placementOptimization.method;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
   document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
@@ -2188,11 +2220,13 @@ function calculate() {
   document.getElementById("coverageModeValue").textContent =
     `${coverageNames[coverageDensity] || coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
   document.getElementById("placementOptimizationValue").textContent =
-    room.shape === "rectangle"
-      ? "Nevyžadována – pravidelná mřížka"
-      : placementOptimization.optimized
-        ? `${placementOptimization.method} • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
-        : `${placementOptimization.method} • bez přínosu dalšího posunu`;
+    !placementOptimizationEnabled
+      ? "Vypnuto – pravidelné zarovnání"
+      : room.shape === "rectangle"
+        ? "Zapnuto – pravidelná mřížka je již vhodná"
+        : placementOptimization.optimized
+          ? `${placementOptimization.method} • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
+          : `${placementOptimization.method} • další posun nepřinesl zlepšení`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -2255,7 +2289,7 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
 
 
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","diameter"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","diameter","placementOptimization"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (["length","width","lCutWidth","lCutLength","lCutCorner","diameter"].includes(id)) {
