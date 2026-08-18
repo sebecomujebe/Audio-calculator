@@ -1,4 +1,4 @@
-const APP_VERSION = "0.71.1";
+const APP_VERSION = "0.72";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -346,33 +346,27 @@ function calculateHeatmap({
   speaker,
   tap
 }) {
-  // Adaptivní přesná síť:
-  // cílíme na cca 0,5 m mezi vzorky; u extrémně velkých prostor
-  // dovolíme až 0,75 m, aby výpočet zůstal rychlý.
-  const targetStepM = 0.5;
-  const maxStepM = 0.75;
   const lengthM = lengthFt / FEET_PER_METER;
   const widthM = widthFt / FEET_PER_METER;
+  const areaM2 = lengthM * widthM;
 
-  let stepM = targetStepM;
-  let nx = Math.max(12, Math.ceil(widthM / stepM));
-  let ny = Math.max(12, Math.ceil(lengthM / stepM));
+  // Progresivní rozlišení podle velikosti prostoru.
+  let stepM;
+  if (areaM2 <= 500) stepM = 0.5;
+  else if (areaM2 <= 2000) stepM = 0.75;
+  else if (areaM2 <= 5000) stepM = 1.0;
+  else if (areaM2 <= 10000) stepM = 1.5;
+  else stepM = 2.0;
 
-  // Ochrana výkonu pro opravdu velké haly: max ~40 000 bodů.
-  const maxPoints = 40000;
-  if (nx * ny > maxPoints) {
-    const areaM2 = widthM * lengthM;
-    stepM = Math.sqrt(areaM2 / maxPoints);
-    stepM = Math.min(maxStepM, Math.max(targetStepM, stepM));
-    nx = Math.max(12, Math.ceil(widthM / stepM));
-    ny = Math.max(12, Math.ceil(lengthM / stepM));
+  let nx = Math.max(8, Math.ceil(widthM / stepM));
+  let ny = Math.max(8, Math.ceil(lengthM / stepM));
 
-    // Když by i při 0,75 m bylo bodů příliš, omezíme počet poměrově.
-    if (nx * ny > maxPoints) {
-      const scale = Math.sqrt(maxPoints / (nx * ny));
-      nx = Math.max(12, Math.floor(nx * scale));
-      ny = Math.max(12, Math.floor(ny * scale));
-    }
+  // Omezíme počet výpočtových bodů pro velmi velké haly.
+  const maxCalcPoints = 10000;
+  if (nx * ny > maxCalcPoints) {
+    const scale = Math.sqrt(maxCalcPoints / (nx * ny));
+    nx = Math.max(8, Math.floor(nx * scale));
+    ny = Math.max(8, Math.floor(ny * scale));
   }
 
   const actualStepXM = widthM / nx;
@@ -387,15 +381,20 @@ function calculateHeatmap({
     for (let ix = 0; ix < nx; ix++) {
       const xFt = widthFt * (ix + 0.5) / nx;
       const yFt = lengthFt * (iy + 0.5) / ny;
+
       const spl = calculateSPLAtPoint({
-        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
+        xFt,
+        yFt,
+        listenerHeightFt,
+        placements,
+        mountingHeightFt,
+        speaker,
+        tap
       });
 
-      cells.push({ix, iy, spl});
+      cells.push({ ix, iy, spl });
       min = Math.min(min, spl);
       max = Math.max(max, spl);
-
-      // Pro fyzikálně správný průměr hladin pracujeme v lineární energii.
       sumLinear += Math.pow(10, spl / 10);
     }
   }
@@ -403,17 +402,19 @@ function calculateHeatmap({
   const average = 10 * Math.log10(sumLinear / cells.length);
 
   return {
-    nx, ny, cells,
+    nx,
+    ny,
+    cells,
     min,
     max,
     average,
     spread: max - min,
     stepXM: actualStepXM,
     stepYM: actualStepYM,
-    points: cells.length
+    points: cells.length,
+    areaM2
   };
 }
-
 
 function calculateVisualHeatmap({
   lengthFt,
@@ -424,7 +425,6 @@ function calculateVisualHeatmap({
   speaker,
   tap
 }) {
-  // Ve v0.71 používáme pro grafiku i statistiky stejnou adaptivní mřížku.
   return calculateHeatmap({
     lengthFt,
     widthFt,
@@ -436,6 +436,25 @@ function calculateVisualHeatmap({
   });
 }
 
+function prepareRenderedHeatmap(heatmap) {
+  const maxRenderCells = 3500;
+
+  if (heatmap.cells.length <= maxRenderCells) {
+    return heatmap;
+  }
+
+  const stride = Math.ceil(Math.sqrt(heatmap.cells.length / maxRenderCells));
+
+  const renderedCells = heatmap.cells.filter(cell =>
+    cell.ix % stride === 0 && cell.iy % stride === 0
+  );
+
+  return {
+    ...heatmap,
+    cells: renderedCells,
+    renderStride: stride
+  };
+}
 
 function heatColor(value, min, max) {
   const span = Math.max(0.001, max - min);
@@ -799,7 +818,7 @@ function calculate() {
     tap: power.recommendedTap
   });
 
-  const visualHeatmap = heatmap;
+  const visualHeatmap = prepareRenderedHeatmap(heatmap);
   const splStats = heatmap;
 
   if (appState.listenerXFt === null || appState.listenerXFt > widthFt) {

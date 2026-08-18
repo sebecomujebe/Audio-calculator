@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.71.1" />
+  <link rel="stylesheet" href="style.css?v=0.72" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.71.1</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.72</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -24,7 +24,7 @@
           <label>
             <span>Délka místnosti</span>
             <div class="field-with-unit">
-              <input id="length" type="number" max="9999" min="1" step="0.1" value="12" />
+              <input id="length" type="number" max="9999" min="1" step="0.1" value="5" />
               <span>m</span>
             </div>
           </label>
@@ -32,7 +32,7 @@
           <label>
             <span>Šířka místnosti</span>
             <div class="field-with-unit">
-              <input id="width" type="number" max="9999" min="1" step="0.1" value="8" />
+              <input id="width" type="number" max="9999" min="1" step="0.1" value="10" />
               <span>m</span>
             </div>
           </label>
@@ -50,7 +50,7 @@
             <select id="ambientNoisePreset">
               <option value="40">40 dB – velmi tiché prostředí / tichá knihovna</option>
               <option value="50">50 dB – knihovna / tichá kancelář</option>
-              <option value="55" selected>55 dB – muzeum / showroom</option>
+              <option value="55" selected>55 dB – Knihovna / showroom</option>
               <option value="60">60 dB – učebna / běžná konverzace</option>
               <option value="65">65 dB – rušnější kancelář / klidná kavárna</option>
               <option value="70">70 dB – kavárna / jídelna</option>
@@ -229,7 +229,7 @@
             <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
             <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
             <div><dt>Celkový příkon zóny</dt><dd id="zonePowerValue">—</dd></div>
-            <div><dt>Rozlišení výpočtu SPL</dt><dd id="samplingResolutionValue">—</dd></div>
+            <div><dt>Rozlišení výpočtu SPL <span class="help-text">automaticky se zhrubuje u velkých prostorů</span></dt><dd id="samplingResolutionValue">—</dd></div>
             <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
           </dl>
         </div>
@@ -237,6 +237,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.71.1"></script>
+  <script src="app.js?v=0.72"></script>
 </body>
 </html>
