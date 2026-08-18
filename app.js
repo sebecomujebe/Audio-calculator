@@ -1,4 +1,4 @@
-const APP_VERSION = "0.88";
+const APP_VERSION = "0.89";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -37,6 +37,19 @@ const FALLBACK_USE_CASES = {
   background: { label: "Hudba na pozadí", targetSPL: 75, snrAboveAmbient: 6, ampHeadroomFactor: 1.10 },
   utility: { label: "Jednoduché užitkové ozvučení", targetSPL: 70, snrAboveAmbient: 5, ampHeadroomFactor: 1.05 },
 };
+
+
+const COVERAGE_LABELS_CS = {
+  "center-to-center": "Střed ke středu",
+  "min-overlap": "Minimální překrytí",
+  "balanced": "Vyvážené překrytí",
+  "edge-to-edge": "Hrana k hraně",
+  "extended": "Rozšířené rozestupy"
+};
+
+function coverageLabelCs(key, fallback = "") {
+  return COVERAGE_LABELS_CS[key] || fallback || key;
+}
 
 const FALLBACK_COVERAGE_MODES = {
   "center-to-center": { multiplier: 0.5, variation: 1, label: "Střed ke středu" },
@@ -1185,7 +1198,7 @@ function populateCoverageOptions() {
   for (const [key, mode] of Object.entries(COVERAGE_MODES).sort((a,b) => a[1].variation - b[1].variation)) {
     const option = document.createElement("option");
     option.value = key;
-    option.textContent = `${mode.label} (cca ±${mode.variation} dB)`;
+    option.textContent = `${coverageLabelCs(key, mode.label)} (cca ±${mode.variation} dB)`;
     select.appendChild(option);
   }
   if ([...select.options].some(o => o.value === current)) select.value = current;
@@ -1335,16 +1348,70 @@ function updateSuitabilityUI(result) {
 
 
 const PRICE_ENDPOINT = "/api/prices";
+const PRICE_LOCAL_STORAGE_KEY = "audio-calculator:last-good-prices:v1";
+const PRICE_LOCAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const PRICE_DATA = new Map();
 let PRICE_DATA_UPDATED_AT = null;
 let PRICE_DATA_LOAD_STATE = "idle";
+
+
+function savePriceDataLocally(payload) {
+  try {
+    localStorage.setItem(PRICE_LOCAL_STORAGE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      payload
+    }));
+  } catch (_) {
+    // localStorage is only a convenience fallback.
+  }
+}
+
+function loadPriceDataLocally() {
+  try {
+    const raw = localStorage.getItem(PRICE_LOCAL_STORAGE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    const savedAt = Date.parse(cached?.savedAt || "");
+    if (!Number.isFinite(savedAt)) return null;
+    if (Date.now() - savedAt > PRICE_LOCAL_MAX_AGE_MS) return null;
+    return cached.payload || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyPricePayload(payload) {
+  const items = payload?.items || payload?.prices || payload;
+  if (!items || typeof items !== "object") {
+    throw new Error("Neplatný formát cenových dat");
+  }
+
+  PRICE_DATA.clear();
+
+  for (const [code, raw] of Object.entries(items)) {
+    if (!code) continue;
+
+    const item = typeof raw === "number" ? { priceVat: raw } : raw;
+    const priceVat = Number(item?.priceVat ?? item?.PRICE_VAT ?? item?.price_vat);
+
+    if (Number.isFinite(priceVat)) {
+      PRICE_DATA.set(code, {
+        ...item,
+        priceVat
+      });
+    }
+  }
+
+  PRICE_DATA_UPDATED_AT = payload?.updatedAt || payload?.updated_at || null;
+  return PRICE_DATA.size;
+}
 
 async function loadPriceData() {
   PRICE_DATA_LOAD_STATE = "loading";
   const statusEl = document.getElementById("priceDataStatus");
 
   try {
-    const response = await fetch(`${PRICE_ENDPOINT}?_=${Date.now()}`, {
+    const response = await fetch(PRICE_ENDPOINT, {
       cache: "no-store"
     });
 
@@ -1353,42 +1420,42 @@ async function loadPriceData() {
     }
 
     const payload = await response.json();
-    const items = payload?.items || payload?.prices || payload;
+    const count = applyPricePayload(payload);
 
-    if (!items || typeof items !== "object") {
-      throw new Error("Neplatný formát cenových dat");
+    if (!count) {
+      throw new Error("Cenový feed je prázdný");
     }
 
-    PRICE_DATA.clear();
+    savePriceDataLocally(payload);
+    PRICE_DATA_LOAD_STATE = "ready";
 
-    for (const [code, raw] of Object.entries(items)) {
-      if (!code) continue;
+    if (statusEl) {
+      const source = response.headers.get("X-Price-Cache");
+      statusEl.textContent = source === "stale"
+        ? "Ceny načteny – poslední známé"
+        : "Ceny načteny";
+    }
 
-      const item = typeof raw === "number"
-        ? { priceVat: raw }
-        : raw;
+    return true;
+  } catch (error) {
+    const localPayload = loadPriceDataLocally();
 
-      const priceVat = Number(item?.priceVat ?? item?.PRICE_VAT ?? item?.price_vat);
-
-      if (Number.isFinite(priceVat)) {
-        PRICE_DATA.set(code, {
-          ...item,
-          priceVat
-        });
+    if (localPayload) {
+      try {
+        const count = applyPricePayload(localPayload);
+        if (count) {
+          PRICE_DATA_LOAD_STATE = "local-fallback";
+          if (statusEl) {
+            statusEl.textContent = "Ceny – poslední uložené";
+            statusEl.title = "Serverový cenový feed není dostupný; používá se poslední úspěšně uložený ceník.";
+          }
+          return true;
+        }
+      } catch (_) {
+        // Continue to unavailable state.
       }
     }
 
-    PRICE_DATA_UPDATED_AT = payload?.updatedAt || payload?.updated_at || null;
-    PRICE_DATA_LOAD_STATE = PRICE_DATA.size > 0 ? "ready" : "empty";
-
-    if (statusEl) {
-      statusEl.textContent = PRICE_DATA.size > 0
-        ? "Ceny načteny"
-        : "Cenový feed je prázdný";
-    }
-
-    return PRICE_DATA.size > 0;
-  } catch (error) {
     PRICE_DATA_LOAD_STATE = "unavailable";
     if (statusEl) {
       statusEl.textContent = "Cenový feed zatím není připojen";
