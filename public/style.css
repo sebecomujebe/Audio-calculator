@@ -803,3 +803,10 @@ input[type="number"]::-webkit-outer-spin-button {
 #widthRow.hidden { display: none !important; }
 .shape-extra { margin: 4px 0; }
 #roomShape { width: 100%; }
+
+
+/* v0.92 – optimalizace nepravidelných půdorysů */
+#placementOptimizationValue {
+  max-width: 58%;
+  text-align: right;
+}

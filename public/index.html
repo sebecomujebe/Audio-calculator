@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.90" />
+  <link rel="stylesheet" href="style.css?v=0.92" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.90</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.92</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -334,6 +334,7 @@
               <dd id="targetSplValue">75 dB</dd>
             </div>
             <div><dt>Režim pokrytí / očekávaná odchylka</dt><dd id="coverageModeValue">—</dd></div>
+            <div><dt>Optimalizace rozmístění</dt><dd id="placementOptimizationValue">—</dd></div>
             <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
             <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
             <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
@@ -360,7 +361,6 @@
             <div><dt id="amplifierRequiredPowerLabel">Požadovaný výkon včetně rezervy</dt><dd id="amplifierRequiredPowerValue">—</dd></div>
             <div><dt>Dostupná kapacita</dt><dd id="amplifierCapacityValue">—</dd></div>
             <div><dt>Využití výkonu</dt><dd id="amplifierUtilizationValue">—</dd></div>
-            <div><dt>Kód AV Integra</dt><dd id="amplifierCodeValue">—</dd></div>
           </dl>
         </div>
 
@@ -406,6 +406,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.90"></script>
+  <script src="app.js?v=0.92"></script>
 </body>
 </html>

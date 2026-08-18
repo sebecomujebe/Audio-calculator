@@ -1,4 +1,4 @@
-const APP_VERSION = "0.90";
+const APP_VERSION = "0.92";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -610,6 +610,199 @@ function calculatePlacements(coverage, room = null) {
 }
 
 
+function makeOptimizationSamples(room, maxPoints = 900) {
+  const aspect = Math.max(0.1, room.widthM / Math.max(0.1, room.lengthM));
+  let nx = Math.max(10, Math.round(Math.sqrt(maxPoints * aspect)));
+  let ny = Math.max(10, Math.round(maxPoints / nx));
+
+  // Keep the sample count bounded for very elongated spaces.
+  nx = Math.min(nx, 80);
+  ny = Math.min(ny, 80);
+
+  const samples = [];
+  for (let iy = 0; iy < ny; iy++) {
+    const yM = room.lengthM * (iy + 0.5) / ny;
+    for (let ix = 0; ix < nx; ix++) {
+      const xM = room.widthM * (ix + 0.5) / nx;
+      if (isPointInsideRoomMeters(xM, yM, room)) {
+        samples.push({xM, yM});
+      }
+    }
+  }
+  return samples;
+}
+
+function placementGeometryScore(placements, room, samples = null) {
+  if (!placements?.length) return Infinity;
+  const pts = placements.map(p => ({
+    xM: p.x / FEET_PER_METER,
+    yM: p.y / FEET_PER_METER
+  }));
+  const testPoints = samples || makeOptimizationSamples(room);
+
+  const distances = [];
+  for (const s of testPoints) {
+    let bestD2 = Infinity;
+    for (const p of pts) {
+      const dx = s.xM - p.xM;
+      const dy = s.yM - p.yM;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) bestD2 = d2;
+    }
+    distances.push(Math.sqrt(bestD2));
+  }
+
+  if (!distances.length) return Infinity;
+  distances.sort((a,b) => a-b);
+
+  const mean = distances.reduce((a,b) => a+b, 0) / distances.length;
+  const variance = distances.reduce((sum,d) => sum + Math.pow(d - mean, 2), 0) / distances.length;
+  const std = Math.sqrt(variance);
+  const p90 = distances[Math.min(distances.length - 1, Math.floor(distances.length * 0.90))];
+  const max = distances[distances.length - 1];
+
+  // Worst uncovered areas dominate, then the 90th percentile and global spread.
+  return max * 0.55 + p90 * 0.30 + std * 0.15;
+}
+
+function relaxPlacements(placements, room, iterations = 4, blend = 0.58) {
+  if (!placements?.length) return placements || [];
+
+  const samples = makeOptimizationSamples(room);
+  let pts = placements.map(p => ({
+    xM: p.x / FEET_PER_METER,
+    yM: p.y / FEET_PER_METER
+  }));
+
+  for (let iteration = 0; iteration < iterations; iteration++) {
+    const accum = pts.map(() => ({x:0, y:0, n:0}));
+
+    for (const s of samples) {
+      let bestIndex = 0;
+      let bestD2 = Infinity;
+
+      for (let i = 0; i < pts.length; i++) {
+        const dx = s.xM - pts[i].xM;
+        const dy = s.yM - pts[i].yM;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestIndex = i;
+        }
+      }
+
+      accum[bestIndex].x += s.xM;
+      accum[bestIndex].y += s.yM;
+      accum[bestIndex].n++;
+    }
+
+    pts = pts.map((p, i) => {
+      if (!accum[i].n) return p;
+
+      const targetX = accum[i].x / accum[i].n;
+      const targetY = accum[i].y / accum[i].n;
+      const nextX = p.xM * (1 - blend) + targetX * blend;
+      const nextY = p.yM * (1 - blend) + targetY * blend;
+      const clamped = clampPointToRoomMeters(nextX, nextY, room);
+
+      return {xM: clamped.xM, yM: clamped.yM};
+    });
+  }
+
+  return pts.map(p => ({
+    x: p.xM * FEET_PER_METER,
+    y: p.yM * FEET_PER_METER
+  }));
+}
+
+function generateCircularRadialPlacements(count, room) {
+  if (!count) return [];
+  const r = room.diameterM / 2;
+  const cx = r;
+  const cy = r;
+
+  if (count === 1) {
+    return [{x: cx * FEET_PER_METER, y: cy * FEET_PER_METER}];
+  }
+
+  // Vogel / golden-angle distribution: radial pattern with approximately
+  // equal area per loudspeaker rather than a rectangular grid clipped by a circle.
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const usableR = r * 0.88;
+  const points = [];
+
+  for (let i = 0; i < count; i++) {
+    const rr = usableR * Math.sqrt((i + 0.45) / count);
+    const angle = i * goldenAngle;
+    const xM = cx + rr * Math.cos(angle);
+    const yM = cy + rr * Math.sin(angle);
+    points.push({x: xM * FEET_PER_METER, y: yM * FEET_PER_METER});
+  }
+
+  return points;
+}
+
+function optimizePlacementsForRoom(basePlacements, room) {
+  const base = basePlacements.map(p => ({...p}));
+
+  if (!base.length || room.shape === "rectangle") {
+    return {
+      placements: base,
+      optimized: false,
+      method: "Pravidelná mřížka",
+      improvementPct: 0
+    };
+  }
+
+  const samples = makeOptimizationSamples(room);
+  const baseScore = placementGeometryScore(base, room, samples);
+  let bestPlacements = base;
+  let bestScore = baseScore;
+  let method = room.shape === "circle" ? "Oříznutá mřížka" : "Výchozí mřížka";
+
+  const relaxedGrid = relaxPlacements(base, room, 5, 0.58);
+  const relaxedGridScore = placementGeometryScore(relaxedGrid, room, samples);
+  if (relaxedGridScore < bestScore) {
+    bestPlacements = relaxedGrid;
+    bestScore = relaxedGridScore;
+    method = room.shape === "circle" ? "Optimalizovaná mřížka" : "Optimalizované rozmístění L";
+  }
+
+  if (room.shape === "circle") {
+    const radial = generateCircularRadialPlacements(base.length, room);
+    const radialOptimized = relaxPlacements(radial, room, 4, 0.46);
+    const radialScore = placementGeometryScore(radialOptimized, room, samples);
+
+    if (radialScore < bestScore) {
+      bestPlacements = radialOptimized;
+      bestScore = radialScore;
+      method = "Radiální rozmístění";
+    }
+  }
+
+  const improvementPct = Number.isFinite(baseScore) && baseScore > 0
+    ? Math.max(0, (baseScore - bestScore) / baseScore * 100)
+    : 0;
+
+  // Ignore numerical noise. If optimization doesn't measurably help,
+  // keep the original positions.
+  if (improvementPct < 0.5) {
+    return {
+      placements: base,
+      optimized: false,
+      method: room.shape === "circle" ? "Oříznutá mřížka" : "Výchozí mřížka",
+      improvementPct: 0
+    };
+  }
+
+  return {
+    placements: bestPlacements,
+    optimized: true,
+    method,
+    improvementPct
+  };
+}
+
 function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, coverage) {
   const headroom = HEADROOM_BY_APPLICATION[useCase] || 10;
   const distanceLoss = 20 * Math.log10(coverage.listenerDistance / SPL_REFERENCE_DISTANCE_FT);
@@ -936,9 +1129,9 @@ function drawFloorPlan({
 
   const dims = `
     <text x="${W/2}" y="${oy + roomH + 34}" text-anchor="middle"
-      fill="#9ba8b7" font-size="13">${widthM.toFixed(1)} m</text>
+      fill="#dfe6ee" font-size="16" font-weight="700">${widthM.toFixed(1)} m</text>
     <text x="${ox - 26}" y="${H/2}" text-anchor="middle"
-      fill="#9ba8b7" font-size="13"
+      fill="#dfe6ee" font-size="16" font-weight="700"
       transform="rotate(-90 ${ox - 26} ${H/2})">${lengthM.toFixed(1)} m</text>
   `;
 
@@ -1760,7 +1953,6 @@ function updateAmplifierUI(result) {
   const required = document.getElementById("amplifierRequiredPowerValue");
   const capacity = document.getElementById("amplifierCapacityValue");
   const utilization = document.getElementById("amplifierUtilizationValue");
-  const code = document.getElementById("amplifierCodeValue");
   const detail = document.getElementById("amplifierDetail");
 
     const reservePct = Math.max(0, Math.round((result.headroomFactor - 1) * 100));
@@ -1774,7 +1966,6 @@ function updateAmplifierUI(result) {
     model.textContent = "Nenalezen vhodný model";
     capacity.textContent = "—";
     utilization.textContent = "—";
-    code.textContent = "—";
     detail.textContent = "V databázi není aktivní zesilovač, který splní požadovaný výkon a limity rozdělení zóny.";
     return;
   }
@@ -1782,7 +1973,6 @@ function updateAmplifierUI(result) {
   model.textContent = `${result.ampCount > 1 ? result.ampCount + "× " : ""}${result.amp.model}`;
   capacity.textContent = `${result.totalCapacity.toFixed(0)} W`;
   utilization.textContent = `${result.utilization.toFixed(0)} %`;
-  code.textContent = result.amp.avCode || "kód není v AV Integra feedu";
   const danteText = result.amp.hasDante ? "Dante" : "bez Dante";
   const dspText = result.amp.hasDSP ? "DSP" : "bez DSP";
   detail.textContent =
@@ -1876,13 +2066,16 @@ function calculate() {
     return;
   }
 
-  const placements = calculatePlacements(coverage, room);
-  const effectiveCoverage = {...coverage, count: placements.length};
+  const basePlacements = calculatePlacements(coverage, room);
 
-  if (!placements.length) {
+  if (!basePlacements.length) {
     alert("Pro zadaný tvar místnosti se nepodařilo umístit žádný reproduktor.");
     return;
   }
+
+  const placementOptimization = optimizePlacementsForRoom(basePlacements, room);
+  const placements = placementOptimization.placements;
+  const effectiveCoverage = {...coverage, count: placements.length};
 
   const power = calculatePower({
     speaker,
@@ -1965,7 +2158,10 @@ function calculate() {
   document.getElementById("resultTitle").textContent = speaker.model;
   updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${effectiveCoverage.count} ks`;
-  document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
+  document.getElementById("layoutValue").textContent =
+    room.shape === "rectangle"
+      ? `${coverage.columns} × ${coverage.rows}`
+      : placementOptimization.method;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
   document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
@@ -1991,6 +2187,12 @@ function calculate() {
   };
   document.getElementById("coverageModeValue").textContent =
     `${coverageNames[coverageDensity] || coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
+  document.getElementById("placementOptimizationValue").textContent =
+    room.shape === "rectangle"
+      ? "Nevyžadována – pravidelná mřížka"
+      : placementOptimization.optimized
+        ? `${placementOptimization.method} • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
+        : `${placementOptimization.method} • bez přínosu dalšího posunu`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -2005,7 +2207,7 @@ function calculate() {
 
   appState.latest = {
     lengthM, widthM, heightM, lengthFt, widthFt,
-    placements, coverage: effectiveCoverage, room, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
+    placements, coverage: effectiveCoverage, room, placementOptimization, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
     listenerHeightFt, mountingHeightFt
   };
