@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.85" />
+  <link rel="stylesheet" href="style.css?v=0.86" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.85</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.86</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -315,10 +315,49 @@
             <div><dt>Kód AV Integra</dt><dd id="amplifierCodeValue">—</dd></div>
           </dl>
         </div>
+
+        <div class="panel price-summary-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">CENA NÁVRHU</div>
+              <h2>Cenové shrnutí</h2>
+            </div>
+            <span id="priceDataStatus" class="price-status">Připraveno pro cenový feed</span>
+          </div>
+
+          <div class="price-table-wrap">
+            <table class="price-table">
+              <thead>
+                <tr>
+                  <th>Produkt</th>
+                  <th>Množství</th>
+                  <th>Kód</th>
+                  <th>Cena / ks</th>
+                  <th>Celkem</th>
+                </tr>
+              </thead>
+              <tbody id="priceSummaryBody">
+                <tr>
+                  <td colspan="5">—</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th colspan="4">Celková cena vč. DPH</th>
+                  <th id="priceGrandTotal">—</th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <p class="price-note" id="priceSummaryNote">
+            Cenová logika je připravena. V další fázi se sem napojí denně aktualizovaný AV Integra feed podle kódu produktu.
+          </p>
+        </div>
       </section>
     </section>
   </main>
 
-  <script src="app.js?v=0.85"></script>
+  <script src="app.js?v=0.86"></script>
 </body>
 </html>

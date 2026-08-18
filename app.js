@@ -1,4 +1,4 @@
-const APP_VERSION = "0.85";
+const APP_VERSION = "0.86";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -913,6 +913,15 @@ function drawSectionView({
   const listenerAxisM = (axis === "length" ? listenerYFt : listenerXFt) / FEET_PER_METER;
   const listenerSpl = calculateSectionListenerSpl(axis, listenerAxisM);
 
+  const clipId = `${svgId}-room-clip`;
+  const defs = `
+    <defs>
+      <clipPath id="${clipId}">
+        <rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"/>
+      </clipPath>
+    </defs>
+  `;
+
   const roomRect = `<rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"
     fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
 
@@ -978,7 +987,7 @@ function drawSectionView({
     </g>
   `;
 
-  svg.innerHTML = roomRect + coneSvg + earLine + floorCeilingLabels + speakersSvg + listenerSvg;
+  svg.innerHTML = defs + roomRect + `<g clip-path="url(#${clipId})">${coneSvg}</g>` + earLine + floorCeilingLabels + speakersSvg + listenerSvg;
 
   if (!appState.sectionGeom) appState.sectionGeom = {};
   appState.sectionGeom[svgId] = {
@@ -1283,6 +1292,84 @@ function updateSuitabilityUI(result) {
 }
 
 
+const PRICE_DATA = new Map();
+
+function formatCzk(value) {
+  if (!Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("cs-CZ", {
+    style: "currency",
+    currency: "CZK",
+    maximumFractionDigits: 0
+  }).format(value);
+}
+
+function getPriceByAvCode(avCode) {
+  if (!avCode) return null;
+  const item = PRICE_DATA.get(avCode);
+  return item && Number.isFinite(item.priceVat) ? item : null;
+}
+
+function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
+  const body = document.getElementById("priceSummaryBody");
+  const totalEl = document.getElementById("priceGrandTotal");
+  const statusEl = document.getElementById("priceDataStatus");
+  const noteEl = document.getElementById("priceSummaryNote");
+  if (!body || !totalEl) return;
+
+  const rows = [];
+
+  rows.push({
+    name: `${speaker.manufacturer || ""} ${speaker.model}`.trim(),
+    qty: speakerCount,
+    code: speaker.avCode || "",
+    priceItem: getPriceByAvCode(speaker.avCode)
+  });
+
+  if (amplifierRecommendation?.found) {
+    const a = amplifierRecommendation.amp;
+    rows.push({
+      name: `${a.manufacturer || ""} ${a.model}`.trim(),
+      qty: amplifierRecommendation.ampCount || 1,
+      code: a.avCode || "",
+      priceItem: getPriceByAvCode(a.avCode)
+    });
+  }
+
+  let total = 0;
+  let complete = true;
+
+  body.innerHTML = rows.map(row => {
+    const price = row.priceItem?.priceVat;
+    const subtotal = Number.isFinite(price) ? price * row.qty : null;
+    if (Number.isFinite(subtotal)) total += subtotal;
+    else complete = false;
+
+    return `
+      <tr>
+        <td>${row.name}</td>
+        <td>${row.qty}×</td>
+        <td>${row.code || "—"}</td>
+        <td>${formatCzk(price)}</td>
+        <td>${formatCzk(subtotal)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  totalEl.textContent = complete ? formatCzk(total) : "—";
+
+  if (PRICE_DATA.size > 0) {
+    statusEl.textContent = complete ? "Ceny načteny" : "Ceny částečně dostupné";
+    noteEl.textContent = complete
+      ? "Ceny jsou uvedeny včetně DPH."
+      : "U některých položek chybí cena nebo kód produktu; celková cena proto není zobrazena.";
+  } else {
+    statusEl.textContent = "Připraveno pro cenový feed";
+    noteEl.textContent =
+      "Položky a množství jsou připravené. V další fázi se ceny doplní z denně aktualizovaného AV Integra feedu podle kódu produktu.";
+  }
+}
+
+
 function recommendAmplifier({
   zonePower,
   voltage,
@@ -1555,7 +1642,9 @@ function calculate() {
     recommendedTapAuto: power.recommendedTap,
     recommendedTap: selectedTap,
     totalPower: coverage.count * selectedTap,
-    singleSpeakerSPL: speaker.sensitivity + 10 * Math.log10(Math.max(selectedTap, 0.001))
+    singleSpeakerSPL:
+      power.singleSpeakerSPL +
+      10 * Math.log10(Math.max(selectedTap, 0.001) / Math.max(power.recommendedTap, 0.001))
   };
 
   const amplifierRecommendation = recommendAmplifier({
@@ -1612,7 +1701,7 @@ function calculate() {
   updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${coverage.count} ks`;
   document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
-  document.getElementById("tapValue").textContent = `${power.recommendedTap} W`;
+  document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
   document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
   document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
@@ -1637,12 +1726,13 @@ function calculate() {
   document.getElementById("selectedTapValue").textContent = `${selectedTap.toString().replace(".", ",")} W`;
   document.getElementById("zonePowerValue").textContent = `${adjustedPower.totalPower.toFixed(0)} W`;
   updateAmplifierUI(amplifierRecommendation);
+  updatePriceSummary({ speaker, speakerCount: coverage.count, amplifierRecommendation });
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
 
   appState.latest = {
     lengthM, widthM, heightM, lengthFt, widthFt,
-    placements, coverage, speaker, power, heatmap, visualHeatmap, splStats,
+    placements, coverage, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
     listenerHeightFt, mountingHeightFt
   };

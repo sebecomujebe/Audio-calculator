@@ -720,3 +720,71 @@ input[type="number"]::-webkit-outer-spin-button {
   text-align: left;
   font-weight: 700;
 }
+
+
+/* v0.86 – cenové shrnutí */
+.price-summary-panel {
+  overflow: hidden;
+}
+
+.price-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c8d4df;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.price-table-wrap {
+  overflow-x: auto;
+}
+
+.price-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.price-table th,
+.price-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.price-table th:first-child,
+.price-table td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+.price-table th:nth-child(3),
+.price-table td:nth-child(3) {
+  text-align: left;
+}
+
+.price-table thead th {
+  color: #9ba8b7;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.price-table tfoot th {
+  padding-top: 14px;
+  border-bottom: 0;
+  font-size: 14px;
+}
+
+.price-note {
+  margin: 12px 0 0;
+  color: #8f9dab;
+  font-size: 11px;
+  line-height: 1.45;
+}
