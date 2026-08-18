@@ -433,3 +433,50 @@ input[type="number"]::-webkit-outer-spin-button {
 .summary-explained dt {
   align-self: center;
 }
+
+/* v0.6 – kompaktnější rozměrová pole */
+.grid-2 .field-with-unit,
+#pendantHeightRow .field-with-unit {
+  width: 150px;
+  max-width: 100%;
+}
+
+.grid-2 label {
+  min-width: 0;
+}
+
+.grid-2 input[type="number"] {
+  min-width: 0;
+}
+
+/* Kompaktní a vystředěná legenda heatmapy */
+.heatmap-scale-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0;
+  width: auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.heatbar {
+  width: 230px;
+  max-width: 38vw;
+  flex: 0 1 230px;
+}
+
+@media (max-width: 520px) {
+  .heatbar {
+    width: 150px;
+  }
+}

@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.5" />
+  <link rel="stylesheet" href="style.css?v=0.6" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.5</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.6</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -24,7 +24,7 @@
           <label>
             <span>Délka místnosti</span>
             <div class="field-with-unit">
-              <input id="length" type="number" min="1" step="0.1" value="12" />
+              <input id="length" type="number" max="9999" min="1" step="0.1" value="12" />
               <span>m</span>
             </div>
           </label>
@@ -32,7 +32,7 @@
           <label>
             <span>Šířka místnosti</span>
             <div class="field-with-unit">
-              <input id="width" type="number" min="1" step="0.1" value="8" />
+              <input id="width" type="number" max="9999" min="1" step="0.1" value="8" />
               <span>m</span>
             </div>
           </label>
@@ -40,7 +40,7 @@
           <label>
             <span>Výška místnosti</span>
             <div class="field-with-unit">
-              <input id="height" type="number" min="2" step="0.1" value="3.2" />
+              <input id="height" type="number" max="9999" min="2" step="0.1" value="3.2" />
               <span>m</span>
             </div>
           </label>
@@ -96,7 +96,7 @@
         <label id="pendantHeightRow" class="hidden">
           <span>Výška zavěšení reproduktoru</span>
           <div class="field-with-unit">
-            <input id="pendantHeight" type="number" min="2" step="0.1" value="3" />
+            <input id="pendantHeight" type="number" max="9999" min="2" step="0.1" value="3" />
             <span>m</span>
           </div>
         </label>
@@ -154,15 +154,15 @@
               <strong id="listenerSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Průměrné SPL</span>
+              <span class="stat-label">Průměrné SPL v prostoru</span>
               <strong id="averageSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Minimální SPL</span>
+              <span class="stat-label">Minimální SPL v prostoru</span>
               <strong id="minimumSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Maximální SPL</span>
+              <span class="stat-label">Maximální SPL v prostoru</span>
               <strong id="maximumSplValue">—</strong>
             </div>
             <div class="stat">
@@ -184,10 +184,12 @@
             <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
           </div>
 
-          <div class="heatmap-scale">
-            <span>nižší SPL</span>
-            <div class="heatbar"></div>
-            <span>vyšší SPL</span>
+          <div class="heatmap-scale-wrap">
+            <div class="heatmap-scale">
+              <span>nižší SPL</span>
+              <div class="heatbar"></div>
+              <span>vyšší SPL</span>
+            </div>
           </div>
           <div class="legend">
             <span><i class="legend-dot speaker-dot"></i> reproduktor</span>
@@ -205,8 +207,10 @@
 
           <dl class="summary-list">
             <div><dt>Doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
-            <div class="summary-explained"><dt>Cílové SPL <span class="help-text">vychází z typu použití a okolního hluku</span></dt><dd id="targetSplValue">75 dB</dd></div>
-            <div><dt>Výpočet cílového SPL</dt><dd id="targetSplBasisValue">—</dd></div>
+            <div class="summary-explained">
+              <dt id="targetSplLabel">Cílové SPL</dt>
+              <dd id="targetSplValue">75 dB</dd>
+            </div>
             <div><dt>Režim pokrytí / očekávaná odchylka</dt><dd id="coverageModeValue">—</dd></div>
             <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
             <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
@@ -220,6 +224,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.5"></script>
+  <script src="app.js?v=0.6"></script>
 </body>
 </html>

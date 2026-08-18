@@ -1,4 +1,4 @@
-const APP_VERSION = "0.5";
+const APP_VERSION = "0.6";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -233,11 +233,13 @@ function calculatePlacements(coverage) {
 function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, coverage) {
   const headroom = HEADROOM_BY_APPLICATION[useCase] || 10;
   const distanceLoss = 20 * Math.log10(coverage.listenerDistance / SPL_REFERENCE_DISTANCE_FT);
+  const arrayGain = 10 * Math.log10(Math.max(1, coverage.count));
 
-  // For tap selection, estimate required level from one speaker at the nominal listener distance.
+  // Stejná logika jako SSC: potřebný tap zohledňuje cílové SPL,
+  // headroom, citlivost, nominální vzdálenost a počet repro.
   const requiredTap = Math.pow(
     10,
-    (targetSPL + headroom - speaker.sensitivity + distanceLoss) / 10
+    (targetSPL + headroom - speaker.sensitivity + distanceLoss - arrayGain) / 10
   );
 
   const taps = voltage === "100V" ? speaker.taps100 : speaker.taps;
@@ -256,9 +258,20 @@ function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, co
     }
   }
 
+  const singleSpeakerSPL =
+    speaker.sensitivity +
+    10 * Math.log10(recommendedTap) -
+    distanceLoss;
+
+  const combinedSPL =
+    singleSpeakerSPL +
+    arrayGain;
+
   return {
     requiredTap,
     recommendedTap,
+    singleSpeakerSPL,
+    combinedSPL,
     totalPower: recommendedTap * coverage.count
   };
 }
@@ -284,6 +297,44 @@ function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHe
   }
 
   return 10 * Math.log10(Math.max(totalIntensity, 1e-12));
+}
+
+
+function calculateSPLStatsLikeSSC({
+  lengthFt,
+  widthFt,
+  placements,
+  mountingHeightFt,
+  listenerHeightFt,
+  speaker,
+  tap
+}) {
+  const stepFt = 3;
+  const values = [];
+
+  for (let xFt = stepFt; xFt < widthFt; xFt += stepFt) {
+    for (let yFt = stepFt; yFt < lengthFt; yFt += stepFt) {
+      values.push(calculateSPLAtPoint({
+        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
+      }));
+    }
+  }
+
+  if (!values.length) {
+    return { min: 0, max: 0, average: 0, spread: 0, variation: 0 };
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const average = values.reduce((a,b) => a + b, 0) / values.length;
+
+  return {
+    min,
+    max,
+    average,
+    spread: max - min,
+    variation: (max - min) / 2
+  };
 }
 
 function calculateHeatmap({
@@ -408,6 +459,9 @@ function drawFloorPlan({
         <circle cx="${cx}" cy="${cy}" r="${radius}" fill="#ff7a1a" stroke="#fff" stroke-width="2"/>
         <circle cx="${cx}" cy="${cy}" r="3" fill="#fff"/>
         <text x="${cx}" y="${cy + 24}" text-anchor="middle" fill="#d0d7df" font-size="10">${idx + 1}</text>
+        <text x="${cx}" y="${cy + 38}" text-anchor="middle" fill="#f4f7fb" font-size="10" font-weight="700">
+          ${appState.latest?.power?.singleSpeakerSPL?.toFixed(1) ?? "—"} dB
+        </text>
       </g>`;
   }).join("");
 
@@ -680,6 +734,16 @@ function calculate() {
     tap: power.recommendedTap
   });
 
+  const splStats = calculateSPLStatsLikeSSC({
+    lengthFt,
+    widthFt,
+    placements,
+    mountingHeightFt,
+    listenerHeightFt,
+    speaker,
+    tap: power.recommendedTap
+  });
+
   if (appState.listenerXFt === null || appState.listenerXFt > widthFt) {
     appState.listenerXFt = widthFt / 2;
   }
@@ -702,7 +766,7 @@ function calculate() {
     recommendedSpeaker,
     speakerType,
     targetSPL,
-    heatmap,
+    heatmap: splStats,
     power,
     coverage,
     recommendedCoverage
@@ -714,19 +778,19 @@ function calculate() {
   document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
   document.getElementById("tapValue").textContent = `${power.recommendedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
-  document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
-  document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
-  document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
-  document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
+  document.getElementById("averageSplValue").textContent = `${splStats.average.toFixed(1)} dB`;
+  document.getElementById("minimumSplValue").textContent = `${splStats.min.toFixed(1)} dB`;
+  document.getElementById("maximumSplValue").textContent = `${splStats.max.toFixed(1)} dB`;
+  document.getElementById("spreadSplValue").textContent = `${splStats.spread.toFixed(1)} dB`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
-  document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
   const uc = USE_CASES[useCase];
   const ambientBased = ambientNoise + uc.snrAboveAmbient;
-  const basisText = targetSPL > uc.targetSPL
-    ? `${ambientNoise.toFixed(0)} dB hluk + ${uc.snrAboveAmbient} dB rezerva`
-    : `${uc.label} = ${uc.targetSPL} dB`;
-  document.getElementById("targetSplBasisValue").textContent = basisText;
+  const targetSource = targetSPL > uc.targetSPL
+    ? `${uc.label}; ${ambientNoise.toFixed(0)} dB hluk + ${uc.snrAboveAmbient} dB rezerva`
+    : uc.label;
+  document.getElementById("targetSplLabel").textContent = `Cílové SPL (${targetSource})`;
+  document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
   document.getElementById("coverageModeValue").textContent =
     `${coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
@@ -739,7 +803,7 @@ function calculate() {
 
   appState.latest = {
     lengthM, widthM, lengthFt, widthFt,
-    placements, coverage, speaker, power, heatmap,
+    placements, coverage, speaker, power, heatmap, splStats,
     recommendedSpeaker, recommendedCoverage,
     listenerHeightFt, mountingHeightFt
   };
