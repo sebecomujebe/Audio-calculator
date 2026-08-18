@@ -133,29 +133,73 @@ function getDefaultSpeaker({speakerType, useCase, effectiveHeightFt, lengthFt, w
   return ceiling ? "PS-C63RT" : "PS-P63T";
 }
 
-function calculateCoverage({lengthFt, widthFt, roomHeightFt, pendantHeightFt, coverageAngle}) {
-  const earHeight = SEATED_EAR_HEIGHT_FT;
+function calculateCoverage({
+  lengthFt,
+  widthFt,
+  roomHeightFt,
+  pendantHeightFt,
+  coverageAngle,
+  listenerPosition,
+  coverageDensity,
+  roomCoverage = "full"
+}) {
+  const earHeight = listenerPosition === "standing"
+    ? STANDING_EAR_HEIGHT_FT
+    : SEATED_EAR_HEIGHT_FT;
+
   const mountingHeight = pendantHeightFt > 0 ? pendantHeightFt : roomHeightFt;
   const rawDistance = mountingHeight - earHeight;
+
+  if (rawDistance <= 0) {
+    return null;
+  }
+
   const listenerDistance = Math.max(MIN_LISTENER_DISTANCE_FT, rawDistance);
 
+  // SSC: coverage diameter = 2 * tan(angle/2) * listener distance
   const coverageDiameter = Math.round(
     Math.tan((coverageAngle * Math.PI / 180) / 2) * listenerDistance * 200
   ) / 100;
 
-  const targetSpacing = Math.round(coverageDiameter * 0.707 * 100) / 100;
+  const densityModes = {
+    "center-to-center": { multiplier: 0.5, variation: 1, label: "Center-to-center" },
+    "min-overlap": { multiplier: 0.707, variation: 2, label: "Minimum overlap" },
+    "balanced": { multiplier: 0.85, variation: 3, label: "Balanced" },
+    "edge-to-edge": { multiplier: 1, variation: 4, label: "Edge-to-edge" },
+    "extended": { multiplier: 1.4, variation: 7, label: "Extended" }
+  };
 
-  const columns = Math.max(1, Math.ceil(widthFt / targetSpacing));
-  const rows = Math.max(1, Math.ceil(lengthFt / targetSpacing));
+  const density = densityModes[coverageDensity] || densityModes["min-overlap"];
+  const targetSpacing = Math.round(coverageDiameter * density.multiplier * 100) / 100;
+
+  const rows = roomCoverage === "full"
+    ? Math.max(1, Math.ceil(lengthFt / targetSpacing))
+    : Math.max(1, Math.ceil(lengthFt / targetSpacing) - 1);
+
+  const columns = roomCoverage === "full"
+    ? Math.max(1, Math.ceil(widthFt / targetSpacing))
+    : Math.max(1, Math.ceil(widthFt / targetSpacing) - 1);
+
   const count = rows * columns;
 
-  const spacingX = Math.min(targetSpacing, widthFt / columns);
-  const spacingY = Math.min(targetSpacing, lengthFt / rows);
-  const offsetX = columns === 1 ? widthFt / 2 : spacingX / 2;
-  const offsetY = rows === 1 ? lengthFt / 2 : spacingY / 2;
+  const spacingX = roomCoverage === "full"
+    ? Math.min(targetSpacing, Math.round((widthFt / columns) * 100) / 100)
+    : Math.min(targetSpacing, Math.round((widthFt / (columns + 1)) * 100) / 100);
+
+  const spacingY = roomCoverage === "full"
+    ? Math.min(targetSpacing, Math.round((lengthFt / rows) * 100) / 100)
+    : Math.min(targetSpacing, Math.round((lengthFt / (rows + 1)) * 100) / 100);
+
+  const offsetX = columns === 1
+    ? widthFt / 2
+    : roomCoverage === "full" ? spacingX / 2 : spacingX;
+
+  const offsetY = rows === 1
+    ? lengthFt / 2
+    : roomCoverage === "full" ? spacingY / 2 : spacingY;
 
   return {
-    listenerDistance,
+    listenerDistance: Math.round(listenerDistance * 100) / 100,
     coverageDiameter,
     targetSpacing,
     columns,
@@ -163,8 +207,11 @@ function calculateCoverage({lengthFt, widthFt, roomHeightFt, pendantHeightFt, co
     count,
     spacingX,
     spacingY,
-    offsetX,
-    offsetY
+    offsetX: Math.round(offsetX * 100) / 100,
+    offsetY: Math.round(offsetY * 100) / 100,
+    expectedSPLVariation: density.variation,
+    densityLabel: density.label,
+    roomCoverage
   };
 }
 
@@ -289,6 +336,8 @@ function calculate() {
   const heightM = Number(document.getElementById("height").value);
   const ambientNoise = Number(document.getElementById("ambientNoise").value);
   const useCase = document.getElementById("useCase").value;
+  const listenerPosition = document.getElementById("listenerPosition").value;
+  const coverageDensity = document.getElementById("coverageDensity").value;
   const speakerType = document.getElementById("speakerType").value;
   const voltage = document.getElementById("voltage").value;
   const pendantHeightM = speakerType === "pendant"
@@ -306,7 +355,10 @@ function calculate() {
   const roomHeightFt = toFeet(heightM);
   const pendantHeightFt = pendantHeightM > 0 ? toFeet(pendantHeightM) : 0;
   const mountingHeightFt = pendantHeightFt > 0 ? pendantHeightFt : roomHeightFt;
-  const effectiveHeightFt = Math.max(MIN_LISTENER_DISTANCE_FT, mountingHeightFt - SEATED_EAR_HEIGHT_FT);
+  const earHeightFt = listenerPosition === "standing"
+    ? STANDING_EAR_HEIGHT_FT
+    : SEATED_EAR_HEIGHT_FT;
+  const effectiveHeightFt = Math.max(MIN_LISTENER_DISTANCE_FT, mountingHeightFt - earHeightFt);
 
   const speakerModel = getDefaultSpeaker({
     speakerType,
@@ -326,8 +378,16 @@ function calculate() {
     widthFt,
     roomHeightFt,
     pendantHeightFt,
-    coverageAngle: speaker.coverageAngle
+    coverageAngle: speaker.coverageAngle,
+    listenerPosition,
+    coverageDensity,
+    roomCoverage: "full"
   });
+
+  if (!coverage) {
+    alert("Výška reproduktoru musí být nad výškou posluchače.");
+    return;
+  }
 
   const placements = calculatePlacements(coverage);
 
@@ -346,6 +406,8 @@ function calculate() {
   document.getElementById("splValue").textContent = `${power.combinedSPL.toFixed(1)} dB`;
 
   document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
+  document.getElementById("coverageModeValue").textContent =
+    `${coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -367,7 +429,7 @@ document.getElementById("speakerType").addEventListener("change", (e) => {
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
-["length","width","height","ambientNoise","useCase","speakerType","pendantHeight","voltage"]
+["length","width","height","ambientNoise","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", calculate);
   });
