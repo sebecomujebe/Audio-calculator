@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=0.4" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.4</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -57,12 +57,12 @@
         <label>
           <span>Použití</span>
           <select id="useCase">
-            <option value="background">Background Music</option>
-            <option value="foreground">Foreground Music</option>
-            <option value="general">General Purpose</option>
-            <option value="speech">Speech Reinforcement</option>
-            <option value="paging">Paging / Announcement</option>
-            <option value="utility">Utility</option>
+            <option value="background">Hudba na pozadí</option>
+            <option value="foreground">Hlavní hudební ozvučení</option>
+            <option value="general">Univerzální ozvučení</option>
+            <option value="speech">Zesílení řeči</option>
+            <option value="paging">Hlášení / oznámení</option>
+            <option value="utility">Jednoduché užitkové ozvučení</option>
           </select>
         </label>
 
@@ -118,30 +118,56 @@
 
       <section class="results-column">
         <div class="panel">
-          <div class="section-heading">
-            <div>
+          <div class="section-heading result-heading">
+            <div class="result-main">
               <div class="eyebrow">VÝSLEDEK</div>
-              <h2 id="resultTitle">Sonance PS-C63RT</h2>
+              <div class="result-title-row">
+                <h2 id="resultTitle">—</h2>
+                <span id="statusBadge" class="badge status-recommended">Doporučeno</span>
+              </div>
+              <p id="recommendationReason" class="recommendation-reason">—</p>
             </div>
-            <div id="statusBadge" class="badge">Doporučený návrh</div>
+
+            <div class="speaker-selector-wrap">
+              <label for="speakerOverride">Zvolit jiný model</label>
+              <select id="speakerOverride">
+                <option value="auto">Automaticky – doporučený model</option>
+              </select>
+            </div>
           </div>
 
           <div class="stats-grid">
             <div class="stat">
               <span class="stat-label">Počet repro</span>
-              <strong id="speakerCount">6 ks</strong>
+              <strong id="speakerCount">—</strong>
             </div>
             <div class="stat">
               <span class="stat-label">Rozmístění</span>
-              <strong id="layoutValue">3 × 2</strong>
+              <strong id="layoutValue">—</strong>
             </div>
             <div class="stat">
               <span class="stat-label">Tap</span>
-              <strong id="tapValue">15 W</strong>
+              <strong id="tapValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Kombinované SPL</span>
-              <strong id="splValue">—</strong>
+              <span class="stat-label">SPL u posluchače</span>
+              <strong id="listenerSplValue">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Průměrné SPL</span>
+              <strong id="averageSplValue">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Minimum SPL</span>
+              <strong id="minimumSplValue">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Maximum SPL</span>
+              <strong id="maximumSplValue">—</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Rozptyl max–min</span>
+              <strong id="spreadSplValue">—</strong>
             </div>
           </div>
         </div>
@@ -158,9 +184,14 @@
             <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
           </div>
 
+          <div class="heatmap-scale">
+            <span>nižší SPL</span>
+            <div class="heatbar"></div>
+            <span>vyšší SPL</span>
+          </div>
           <div class="legend">
             <span><i class="legend-dot speaker-dot"></i> reproduktor</span>
-            <span><i class="legend-dot listener-dot"></i> referenční posluchač</span>
+            <span><i class="legend-dot listener-dot"></i> posluchač – tažením ho přesuňte</span>
           </div>
         </div>
 
@@ -173,6 +204,7 @@
           </div>
 
           <dl class="summary-list">
+            <div><dt>Doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
             <div><dt>Cílové SPL</dt><dd id="targetSplValue">75 dB</dd></div>
             <div><dt>Pokrytí / očekávaná variace</dt><dd id="coverageModeValue">—</dd></div>
             <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
@@ -180,12 +212,13 @@
             <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
             <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
             <div><dt>Celkový výkon zóny</dt><dd id="zonePowerValue">—</dd></div>
+            <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
           </dl>
         </div>
       </section>
     </section>
   </main>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=0.4"></script>
 </body>
 </html>

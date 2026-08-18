@@ -313,3 +313,80 @@ dd {
     grid-template-columns: repeat(2, minmax(0,1fr));
   }
 }
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #111820;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.floor-wrap {
+  position: relative;
+  touch-action: none;
+}
+
+#floorPlan {
+  cursor: crosshair;
+  user-select: none;
+}
+
+#floorPlan .listener-group {
+  cursor: grab;
+}
+
+#floorPlan .listener-group:active {
+  cursor: grabbing;
+}
+
+.heatmap-scale {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 280px) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.heatbar {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    hsl(220 85% 52%),
+    hsl(175 78% 46%),
+    hsl(95 78% 50%),
+    hsl(48 95% 55%),
+    hsl(8 90% 58%)
+  );
+}
+
+.result-heading { gap: 24px; }
+.result-main { min-width: 0; flex: 1 1 auto; }
+.result-title-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:4px; }
+.result-title-row h2 { margin:0; }
+.recommendation-reason { margin:9px 0 0; max-width:720px; color:var(--muted); font-size:13px; line-height:1.5; }
+.speaker-selector-wrap { flex:0 1 330px; min-width:250px; }
+.speaker-selector-wrap label { margin-top:0; margin-bottom:7px; color:var(--muted); font-size:12px; font-weight:800; }
+.badge.status-recommended { border-color:rgba(57,194,127,.35); background:rgba(57,194,127,.11); color:#7ae0aa; }
+.badge.status-suitable { border-color:rgba(91,165,255,.35); background:rgba(91,165,255,.11); color:#8dc0ff; }
+.badge.status-less-suitable { border-color:rgba(255,173,66,.4); background:rgba(255,173,66,.11); color:#ffc06f; }
+.badge.status-not-recommended { border-color:rgba(255,94,105,.4); background:rgba(255,94,105,.11); color:#ff8c95; }
+@media (max-width:760px) {
+  .result-heading { flex-direction:column; }
+  .speaker-selector-wrap { width:100%; min-width:0; }
+}

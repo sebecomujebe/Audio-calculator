@@ -1,3 +1,4 @@
+const APP_VERSION = "0.4";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -228,14 +229,15 @@ function calculatePlacements(coverage) {
   return points;
 }
 
+
 function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, coverage) {
   const headroom = HEADROOM_BY_APPLICATION[useCase] || 10;
   const distanceLoss = 20 * Math.log10(coverage.listenerDistance / SPL_REFERENCE_DISTANCE_FT);
-  const arrayGain = 10 * Math.log10(coverage.count);
 
+  // For tap selection, estimate required level from one speaker at the nominal listener distance.
   const requiredTap = Math.pow(
     10,
-    (targetSPL + headroom - speaker.sensitivity + distanceLoss - arrayGain) / 10
+    (targetSPL + headroom - speaker.sensitivity + distanceLoss) / 10
   );
 
   const taps = voltage === "100V" ? speaker.taps100 : speaker.taps;
@@ -254,24 +256,107 @@ function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, co
     }
   }
 
-  const singleSpeakerSPL =
-    speaker.sensitivity +
-    10 * Math.log10(recommendedTap) -
-    distanceLoss;
-
-  const combinedSPL = singleSpeakerSPL + arrayGain;
-
   return {
     requiredTap,
     recommendedTap,
-    singleSpeakerSPL,
-    combinedSPL,
-    snr: combinedSPL - ambientNoise,
     totalPower: recommendedTap * coverage.count
   };
 }
 
-function drawFloorPlan({lengthM, widthM, placements, coverage, speakerModel}) {
+function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap}) {
+  let totalIntensity = 0;
+
+  for (const p of placements) {
+    const dx = xFt - p.x;
+    const dy = yFt - p.y;
+    const dz = mountingHeightFt - listenerHeightFt;
+    const distanceFt = Math.max(
+      MIN_LISTENER_DISTANCE_FT,
+      Math.sqrt(dx * dx + dy * dy + dz * dz)
+    );
+
+    const spl =
+      speaker.sensitivity +
+      10 * Math.log10(tap) -
+      20 * Math.log10(distanceFt / SPL_REFERENCE_DISTANCE_FT);
+
+    totalIntensity += Math.pow(10, spl / 10);
+  }
+
+  return 10 * Math.log10(Math.max(totalIntensity, 1e-12));
+}
+
+function calculateHeatmap({
+  lengthFt,
+  widthFt,
+  placements,
+  mountingHeightFt,
+  listenerHeightFt,
+  speaker,
+  tap
+}) {
+  const nx = 30;
+  const ny = 30;
+  const cells = [];
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const xFt = widthFt * (ix + 0.5) / nx;
+      const yFt = lengthFt * (iy + 0.5) / ny;
+      const spl = calculateSPLAtPoint({
+        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
+      });
+      cells.push({ix, iy, spl});
+      min = Math.min(min, spl);
+      max = Math.max(max, spl);
+      sum += spl;
+    }
+  }
+
+  return {
+    nx, ny, cells,
+    min,
+    max,
+    average: sum / cells.length,
+    spread: max - min
+  };
+}
+
+function heatColor(value, min, max) {
+  const span = Math.max(0.001, max - min);
+  const t = Math.max(0, Math.min(1, (value - min) / span));
+  const hue = 220 - 212 * t;
+  return `hsl(${hue} 82% 52%)`;
+}
+
+let appState = {
+  listenerXFt: null,
+  listenerYFt: null,
+  draggingListener: false,
+  latest: null
+};
+
+function calculatePlacements(coverage) {
+  const points = [];
+  for (let row = 0; row < coverage.rows; row++) {
+    for (let col = 0; col < coverage.columns; col++) {
+      points.push({
+        x: coverage.offsetX + col * coverage.spacingX,
+        y: coverage.offsetY + row * coverage.spacingY
+      });
+    }
+  }
+  return points;
+}
+
+function drawFloorPlan({
+  lengthM, widthM, lengthFt, widthFt,
+  placements, coverage, speakerModel, heatmap,
+  listenerXFt, listenerYFt, listenerSPL
+}) {
   const svg = document.getElementById("floorPlan");
   const W = 900;
   const H = 560;
@@ -282,9 +367,7 @@ function drawFloorPlan({lengthM, widthM, placements, coverage, speakerModel}) {
   const roomH = lengthM * scale;
   const ox = (W - roomW) / 2;
   const oy = (H - roomH) / 2;
-
   const ftToM = 1 / FEET_PER_METER;
-  const radius = Math.max(8, Math.min(22, coverage.coverageDiameter * ftToM * scale * 0.08));
 
   const rect = `<rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"
     fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
@@ -300,6 +383,19 @@ function drawFloorPlan({lengthM, widthM, placements, coverage, speakerModel}) {
       transform="rotate(-90 ${ox - 26} ${H/2})">${lengthM.toFixed(1)} m</text>
   `;
 
+  const cellW = roomW / heatmap.nx;
+  const cellH = roomH / heatmap.ny;
+  const heatCells = heatmap.cells.map(c => {
+    const x = ox + c.ix * cellW;
+    const y = oy + c.iy * cellH;
+    const color = heatColor(c.spl, heatmap.min, heatmap.max);
+    return `<rect x="${x}" y="${y}" width="${cellW + 0.7}" height="${cellH + 0.7}"
+      fill="${color}" fill-opacity="0.44">
+      <title>${c.spl.toFixed(1)} dB</title>
+    </rect>`;
+  }).join("");
+
+  const radius = 10;
   const circles = placements.map((p, idx) => {
     const xM = p.x * ftToM;
     const yM = p.y * ftToM;
@@ -308,27 +404,182 @@ function drawFloorPlan({lengthM, widthM, placements, coverage, speakerModel}) {
 
     return `
       <g>
-        <circle cx="${cx}" cy="${cy}" r="${radius + 6}" fill="rgba(255,122,26,0.12)" stroke="rgba(255,122,26,0.32)" stroke-width="1"/>
+        <circle cx="${cx}" cy="${cy}" r="${radius + 6}" fill="rgba(255,122,26,0.12)" stroke="rgba(255,122,26,0.5)" stroke-width="1"/>
         <circle cx="${cx}" cy="${cy}" r="${radius}" fill="#ff7a1a" stroke="#fff" stroke-width="2"/>
-        <circle cx="${cx}" cy="${cy}" r="${Math.max(2, radius * 0.28)}" fill="#fff"/>
-        <text x="${cx}" y="${cy + radius + 18}" text-anchor="middle" fill="#9ba8b7" font-size="10">${idx + 1}</text>
+        <circle cx="${cx}" cy="${cy}" r="3" fill="#fff"/>
+        <text x="${cx}" y="${cy + 24}" text-anchor="middle" fill="#d0d7df" font-size="10">${idx + 1}</text>
       </g>`;
   }).join("");
 
+  const listenerXM = listenerXFt * ftToM;
+  const listenerYM = listenerYFt * ftToM;
+  const lcx = ox + listenerXM * scale;
+  const lcy = oy + listenerYM * scale;
+
   const listener = `
-    <g>
-      <circle cx="${W/2}" cy="${H/2}" r="14" fill="#5ba5ff" stroke="#fff" stroke-width="2"/>
-      <circle cx="${W/2}" cy="${H/2 - 3}" r="4" fill="#fff"/>
-      <ellipse cx="${W/2}" cy="${H/2 + 5}" rx="6" ry="7" fill="#fff"/>
+    <g class="listener-group" data-listener="true">
+      <circle cx="${lcx}" cy="${lcy}" r="17" fill="#5ba5ff" stroke="#fff" stroke-width="2"/>
+      <circle cx="${lcx}" cy="${lcy - 4}" r="4.5" fill="#fff"/>
+      <ellipse cx="${lcx}" cy="${lcy + 6}" rx="7" ry="8" fill="#fff"/>
+      <rect x="${lcx - 30}" y="${lcy - 48}" width="60" height="22" rx="6" fill="#101820" stroke="#5ba5ff"/>
+      <text x="${lcx}" y="${lcy - 33}" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">
+        ${listenerSPL.toFixed(1)} dB
+      </text>
     </g>
   `;
 
-  svg.innerHTML = rect + title + dims + circles + listener;
+  svg.innerHTML = rect + heatCells + title + dims + circles + listener;
+
+  appState.latest = {
+    ...appState.latest,
+    floorGeom: { W, H, pad, scale, roomW, roomH, ox, oy, lengthFt, widthFt }
+  };
 }
 
 function formatMetersFromFeet(ft) {
   return (ft / FEET_PER_METER).toFixed(2) + " m";
 }
+
+function refreshListenerOnly() {
+  if (!appState.latest) return;
+  const s = appState.latest;
+
+  const listenerSPL = calculateSPLAtPoint({
+    xFt: appState.listenerXFt,
+    yFt: appState.listenerYFt,
+    listenerHeightFt: s.listenerHeightFt,
+    placements: s.placements,
+    mountingHeightFt: s.mountingHeightFt,
+    speaker: s.speaker,
+    tap: s.power.recommendedTap
+  });
+
+  document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
+  document.getElementById("listenerPositionValue").textContent =
+    `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
+
+  drawFloorPlan({
+    lengthM: s.lengthM,
+    widthM: s.widthM,
+    lengthFt: s.lengthFt,
+    widthFt: s.widthFt,
+    placements: s.placements,
+    coverage: s.coverage,
+    speakerModel: s.speaker.model,
+    heatmap: s.heatmap,
+    listenerXFt: appState.listenerXFt,
+    listenerYFt: appState.listenerYFt,
+    listenerSPL
+  });
+}
+
+
+function populateSpeakerOverrideOptions() {
+  const select = document.getElementById("speakerOverride");
+  if (!select) return;
+  const current = select.value || "auto";
+  select.innerHTML = `<option value="auto">Automaticky – doporučený model</option>`;
+
+  const groups = [
+    ["Stropní reproduktory", SPEAKERS.filter(s => s.type === "Ceiling")],
+    ["Závěsné reproduktory", SPEAKERS.filter(s => s.type === "Pendant")]
+  ];
+
+  for (const [label, items] of groups) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const speaker of items) {
+      const option = document.createElement("option");
+      option.value = speaker.model;
+      option.textContent = speaker.model;
+      group.appendChild(option);
+    }
+    select.appendChild(group);
+  }
+  if ([...select.options].some(o => o.value === current)) select.value = current;
+}
+
+function evaluateSpeakerSuitability({
+  selectedSpeaker, recommendedSpeaker, speakerType,
+  targetSPL, heatmap, power, coverage, recommendedCoverage
+}) {
+  if (selectedSpeaker.model === recommendedSpeaker.model) {
+    return {
+      level: "recommended",
+      label: "Doporučeno",
+      reason: "Tento model nejlépe odpovídá zadané výšce, ploše, typu instalace a způsobu použití."
+    };
+  }
+
+  const reasons = [];
+  let penalty = 0;
+  const expectedType = speakerType === "ceiling" ? "Ceiling" : "Pendant";
+
+  if (selectedSpeaker.type !== expectedType) {
+    reasons.push(expectedType === "Ceiling"
+      ? "Model není určen pro stropní instalaci."
+      : "Model není určen pro závěsnou instalaci.");
+    penalty += 4;
+  }
+
+  if (heatmap.min < targetSPL - 3) {
+    reasons.push(`Minimum SPL je ${heatmap.min.toFixed(1)} dB, tedy pod cílem ${targetSPL.toFixed(0)} dB.`);
+    penalty += 3;
+  } else if (heatmap.min < targetSPL) {
+    reasons.push(`V části prostoru je SPL mírně pod cílem ${targetSPL.toFixed(0)} dB.`);
+    penalty += 1;
+  }
+
+  if (coverage.count > recommendedCoverage.count * 1.5) {
+    reasons.push(`Vyžaduje výrazně více reproduktorů (${coverage.count} místo ${recommendedCoverage.count}).`);
+    penalty += 2;
+  } else if (coverage.count > recommendedCoverage.count) {
+    reasons.push(`Vyžaduje více reproduktorů (${coverage.count} místo ${recommendedCoverage.count}).`);
+    penalty += 1;
+  }
+
+  if (heatmap.spread > 8) {
+    reasons.push(`Rovnoměrnost je horší – rozdíl max–min je ${heatmap.spread.toFixed(1)} dB.`);
+    penalty += 2;
+  } else if (heatmap.spread > 5) {
+    reasons.push(`Rozdíl max–min je ${heatmap.spread.toFixed(1)} dB.`);
+    penalty += 1;
+  }
+
+  if (selectedSpeaker.coverageAngle < recommendedSpeaker.coverageAngle) {
+    reasons.push("Užší vyzařovací úhel vyžaduje pečlivější rozmístění.");
+    penalty += 1;
+  }
+
+  if (selectedSpeaker.wooferSize > recommendedSpeaker.wooferSize &&
+      coverage.count >= recommendedCoverage.count) {
+    reasons.push("Model je pro tuto aplikaci zbytečně velký nebo výkonný bez snížení počtu kusů.");
+    penalty += 1;
+  }
+
+  if (reasons.length === 0) {
+    reasons.push("Alternativní model splňuje základní požadavky, ale není výchozí doporučenou volbou.");
+  }
+
+  if (penalty >= 5) return {level:"not-recommended", label:"Nedoporučeno", reason:reasons.join(" ")};
+  if (penalty >= 2) return {level:"less-suitable", label:"Méně vhodné", reason:reasons.join(" ")};
+  return {level:"suitable", label:"Vhodné", reason:reasons.join(" ")};
+}
+
+function updateSuitabilityUI(result) {
+  const badge = document.getElementById("statusBadge");
+  const reason = document.getElementById("recommendationReason");
+  badge.className = "badge";
+  badge.classList.add(
+    result.level === "recommended" ? "status-recommended" :
+    result.level === "suitable" ? "status-suitable" :
+    result.level === "less-suitable" ? "status-less-suitable" :
+    "status-not-recommended"
+  );
+  badge.textContent = result.label;
+  reason.textContent = result.reason;
+}
+
 
 function calculate() {
   const lengthM = Number(document.getElementById("length").value);
@@ -355,12 +606,12 @@ function calculate() {
   const roomHeightFt = toFeet(heightM);
   const pendantHeightFt = pendantHeightM > 0 ? toFeet(pendantHeightM) : 0;
   const mountingHeightFt = pendantHeightFt > 0 ? pendantHeightFt : roomHeightFt;
-  const earHeightFt = listenerPosition === "standing"
+  const listenerHeightFt = listenerPosition === "standing"
     ? STANDING_EAR_HEIGHT_FT
     : SEATED_EAR_HEIGHT_FT;
-  const effectiveHeightFt = Math.max(MIN_LISTENER_DISTANCE_FT, mountingHeightFt - earHeightFt);
+  const effectiveHeightFt = Math.max(MIN_LISTENER_DISTANCE_FT, mountingHeightFt - listenerHeightFt);
 
-  const speakerModel = getDefaultSpeaker({
+  const recommendedModel = getDefaultSpeaker({
     speakerType,
     useCase,
     effectiveHeightFt,
@@ -370,8 +621,22 @@ function calculate() {
     roomHeightFt: mountingHeightFt
   });
 
-  const speaker = getSpeaker(speakerModel);
+  const recommendedSpeaker = getSpeaker(recommendedModel);
+  const overrideValue = document.getElementById("speakerOverride").value;
+  const selectedModel = overrideValue === "auto" ? recommendedModel : overrideValue;
+  const speaker = getSpeaker(selectedModel) || recommendedSpeaker;
   const targetSPL = getTargetSPL(ambientNoise, useCase);
+
+  const recommendedCoverage = calculateCoverage({
+    lengthFt,
+    widthFt,
+    roomHeightFt,
+    pendantHeightFt,
+    coverageAngle: recommendedSpeaker.coverageAngle,
+    listenerPosition,
+    coverageDensity,
+    roomCoverage: "full"
+  });
 
   const coverage = calculateCoverage({
     lengthFt,
@@ -399,12 +664,56 @@ function calculate() {
     voltage
   }, coverage);
 
+  const heatmap = calculateHeatmap({
+    lengthFt,
+    widthFt,
+    placements,
+    mountingHeightFt,
+    listenerHeightFt,
+    speaker,
+    tap: power.recommendedTap
+  });
+
+  if (appState.listenerXFt === null || appState.listenerXFt > widthFt) {
+    appState.listenerXFt = widthFt / 2;
+  }
+  if (appState.listenerYFt === null || appState.listenerYFt > lengthFt) {
+    appState.listenerYFt = lengthFt / 2;
+  }
+
+  const listenerSPL = calculateSPLAtPoint({
+    xFt: appState.listenerXFt,
+    yFt: appState.listenerYFt,
+    listenerHeightFt,
+    placements,
+    mountingHeightFt,
+    speaker,
+    tap: power.recommendedTap
+  });
+
+  const suitability = evaluateSpeakerSuitability({
+    selectedSpeaker: speaker,
+    recommendedSpeaker,
+    speakerType,
+    targetSPL,
+    heatmap,
+    power,
+    coverage,
+    recommendedCoverage
+  });
+
   document.getElementById("resultTitle").textContent = speaker.model;
+  updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${coverage.count} ks`;
   document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
   document.getElementById("tapValue").textContent = `${power.recommendedTap} W`;
-  document.getElementById("splValue").textContent = `${power.combinedSPL.toFixed(1)} dB`;
+  document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
+  document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
+  document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
+  document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
+  document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
 
+  document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
   document.getElementById("coverageModeValue").textContent =
     `${coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
@@ -413,15 +722,34 @@ function calculate() {
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
   document.getElementById("spacingYValue").textContent = formatMetersFromFeet(coverage.spacingY);
   document.getElementById("zonePowerValue").textContent = `${power.totalPower.toFixed(0)} W`;
+  document.getElementById("listenerPositionValue").textContent =
+    `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
+
+  appState.latest = {
+    lengthM, widthM, lengthFt, widthFt,
+    placements, coverage, speaker, power, heatmap,
+    recommendedSpeaker, recommendedCoverage,
+    listenerHeightFt, mountingHeightFt
+  };
 
   drawFloorPlan({
     lengthM,
     widthM,
+    lengthFt,
+    widthFt,
     placements,
     coverage,
-    speakerModel: speaker.model
+    speakerModel: speaker.model,
+    heatmap,
+    listenerXFt: appState.listenerXFt,
+    listenerYFt: appState.listenerYFt,
+    listenerSPL
   });
 }
+
+populateSpeakerOverrideOptions();
+
+document.getElementById("speakerOverride").addEventListener("change", calculate);
 
 document.getElementById("speakerType").addEventListener("change", (e) => {
   document.getElementById("pendantHeightRow").classList.toggle("hidden", e.target.value !== "pendant");
@@ -431,7 +759,53 @@ document.getElementById("calculateBtn").addEventListener("click", calculate);
 
 ["length","width","height","ambientNoise","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage"]
   .forEach(id => {
-    document.getElementById(id).addEventListener("change", calculate);
+    document.getElementById(id).addEventListener("change", () => {
+      if (["length","width"].includes(id)) {
+        appState.listenerXFt = null;
+        appState.listenerYFt = null;
+      }
+      calculate();
+    });
   });
+
+const svg = document.getElementById("floorPlan");
+
+function pointerToListenerPosition(evt) {
+  if (!appState.latest?.floorGeom) return;
+  const g = appState.latest.floorGeom;
+  const rect = svg.getBoundingClientRect();
+  const px = (evt.clientX - rect.left) * (g.W / rect.width);
+  const py = (evt.clientY - rect.top) * (g.H / rect.height);
+
+  const clampedX = Math.max(g.ox, Math.min(g.ox + g.roomW, px));
+  const clampedY = Math.max(g.oy, Math.min(g.oy + g.roomH, py));
+
+  const xM = (clampedX - g.ox) / g.scale;
+  const yM = (clampedY - g.oy) / g.scale;
+
+  appState.listenerXFt = xM * FEET_PER_METER;
+  appState.listenerYFt = yM * FEET_PER_METER;
+  refreshListenerOnly();
+}
+
+svg.addEventListener("pointerdown", (evt) => {
+  appState.draggingListener = true;
+  svg.setPointerCapture?.(evt.pointerId);
+  pointerToListenerPosition(evt);
+});
+
+svg.addEventListener("pointermove", (evt) => {
+  if (!appState.draggingListener) return;
+  pointerToListenerPosition(evt);
+});
+
+svg.addEventListener("pointerup", (evt) => {
+  appState.draggingListener = false;
+  svg.releasePointerCapture?.(evt.pointerId);
+});
+
+svg.addEventListener("pointercancel", () => {
+  appState.draggingListener = false;
+});
 
 calculate();
