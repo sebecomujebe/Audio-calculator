@@ -1,4 +1,4 @@
-const APP_VERSION = "0.82";
+const APP_VERSION = "0.84";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -251,7 +251,7 @@ function setDataSourceStatus(mode, message = "") {
   const el = document.getElementById("dataSourceStatus");
   if (!el) return;
   el.className = "data-source-status " + (mode === "live" ? "data-live" : "data-fallback");
-  el.textContent = mode === "live" ? "Data: Google Sheets" : "Data: lokální záloha";
+  el.textContent = mode === "live" ? "Databáze produktů" : "Databáze produktů – lokální záloha";
   el.title = message;
 }
 
@@ -720,6 +720,8 @@ let appState = {
   listenerXFt: null,
   listenerYFt: null,
   draggingListener: false,
+  draggingSection: null,
+  sectionGeom: {},
   latest: null
 };
 
@@ -823,8 +825,32 @@ function drawFloorPlan({
   };
 }
 
+
 function conePolygonPoints(cx, topY, bottomY, halfWidth) {
   return `${cx},${topY} ${cx - halfWidth},${bottomY} ${cx + halfWidth},${bottomY}`;
+}
+
+function calculateSectionListenerSpl(axis, listenerAxisM) {
+  const s = appState.latest;
+  if (!s) return null;
+
+  const xFt = axis === "width"
+    ? listenerAxisM * FEET_PER_METER
+    : appState.listenerXFt;
+
+  const yFt = axis === "length"
+    ? listenerAxisM * FEET_PER_METER
+    : appState.listenerYFt;
+
+  return calculateSPLAtPoint({
+    xFt,
+    yFt,
+    listenerHeightFt: s.listenerHeightFt,
+    placements: s.placements,
+    mountingHeightFt: s.mountingHeightFt,
+    speaker: s.speaker,
+    tap: s.power.recommendedTap
+  });
 }
 
 function drawSectionView({
@@ -838,34 +864,40 @@ function drawSectionView({
   mountingHeightFt,
   listenerHeightFt,
   listenerXFt,
-  listenerYFt,
-  coneMode = "all"
+  listenerYFt
 }) {
   const svg = document.getElementById(svgId);
   if (!svg) return;
 
   const W = 900;
-  const H = 420;
   const padX = 64;
-  const padTop = 48;
-  const padBottom = 60;
+  const padTop = 42;
+  const padBottom = 58;
 
   const axisLengthM = axis === "length" ? lengthM : widthM;
-  const roomW = W - padX * 2;
-  const roomH = H - padTop - padBottom;
+
+  // Stejné fyzické měřítko v ose X i Y:
+  // 1 metr vodorovně = 1 metr svisle.
+  // Šířka grafu zůstává stejná, dynamická je pouze výška.
+  const usableW = W - padX * 2;
+  const pxPerMeter = usableW / Math.max(0.1, axisLengthM);
+
+  const roomW = usableW;
+  const roomH = Math.max(120, heightM * pxPerMeter);
+  const H = padTop + roomH + padBottom;
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.aspectRatio = `${W} / ${H}`;
+
   const ox = padX;
   const oy = padTop;
-
-  const xScale = roomW / Math.max(0.1, axisLengthM);
-  const yScale = roomH / Math.max(0.1, heightM);
-
   const floorY = oy + roomH;
   const ceilingY = oy;
 
   const mountHeightM = mountingHeightFt / FEET_PER_METER;
   const listenerHeightM = listenerHeightFt / FEET_PER_METER;
-  const speakerY = floorY - mountHeightM * yScale;
-  const earY = floorY - listenerHeightM * yScale;
+  const speakerY = floorY - mountHeightM * pxPerMeter;
+  const earY = floorY - listenerHeightM * pxPerMeter;
 
   const halfAngleRad = Math.max(1, Math.min(179, speaker.coverageAngle)) * Math.PI / 360;
   const verticalDistanceToEarM = Math.max(0.05, mountHeightM - listenerHeightM);
@@ -879,12 +911,7 @@ function drawSectionView({
   )].sort((a,b) => a-b);
 
   const listenerAxisM = (axis === "length" ? listenerYFt : listenerXFt) / FEET_PER_METER;
-  let selectedIndex = 0;
-  if (uniqueAxisPositions.length) {
-    selectedIndex = uniqueAxisPositions.reduce((bestIdx, pos, idx, arr) =>
-      Math.abs(pos - listenerAxisM) < Math.abs(arr[bestIdx] - listenerAxisM) ? idx : bestIdx
-    , 0);
-  }
+  const listenerSpl = calculateSectionListenerSpl(axis, listenerAxisM);
 
   const roomRect = `<rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"
     fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
@@ -909,46 +936,73 @@ function drawSectionView({
     </text>
   `;
 
-  const coneSvg = uniqueAxisPositions.map((posM, idx) => {
-    if (coneMode === "selected" && idx !== selectedIndex) return "";
-    const cx = ox + posM * xScale;
+  const coneSvg = uniqueAxisPositions.map(posM => {
+    const cx = ox + posM * pxPerMeter;
     const bottomY = earY;
-    const halfWidthPx = halfCoverageAtEarM * xScale;
+    const halfWidthPx = halfCoverageAtEarM * pxPerMeter;
     const pts = conePolygonPoints(cx, speakerY, bottomY, halfWidthPx);
-    const opacity = coneMode === "selected" ? 0.24 : 0.10;
+
     return `
-      <polygon points="${pts}" fill="rgba(255,122,26,${opacity})"
-        stroke="rgba(255,150,70,0.65)" stroke-width="1.2"/>
+      <polygon points="${pts}"
+        fill="rgba(255,122,26,0.10)"
+        stroke="rgba(255,150,70,0.65)"
+        stroke-width="1.2"/>
     `;
   }).join("");
 
-  const speakersSvg = uniqueAxisPositions.map((posM, idx) => {
-    const cx = ox + posM * xScale;
-    const selected = idx === selectedIndex;
+  const speakersSvg = uniqueAxisPositions.map(posM => {
+    const cx = ox + posM * pxPerMeter;
     return `
       <g>
-        <line x1="${cx}" y1="${ceilingY}" x2="${cx}" y2="${speakerY}" stroke="#5c6672" stroke-width="1"/>
-        <circle cx="${cx}" cy="${speakerY}" r="${selected ? 8 : 6}" fill="#ff7a1a"
-          stroke="${selected ? "#fff" : "#ffd5b7"}" stroke-width="${selected ? 2 : 1.2}"/>
+        <line x1="${cx}" y1="${ceilingY}" x2="${cx}" y2="${speakerY}"
+          stroke="#5c6672" stroke-width="1"/>
+        <circle cx="${cx}" cy="${speakerY}" r="6"
+          fill="#ff7a1a" stroke="#ffd5b7" stroke-width="1.2"/>
       </g>
     `;
   }).join("");
 
-  const listenerCx = ox + listenerAxisM * xScale;
+  const listenerCx = ox + listenerAxisM * pxPerMeter;
+  const splLabel = Number.isFinite(listenerSpl) ? `${listenerSpl.toFixed(1)} dB` : "—";
+
   const listenerSvg = `
-    <g>
-      <circle cx="${listenerCx}" cy="${earY}" r="8" fill="#5ba5ff" stroke="#fff" stroke-width="1.5"/>
-      <line x1="${listenerCx}" y1="${earY + 8}" x2="${listenerCx}" y2="${floorY - 8}"
+    <g class="section-listener" data-section-axis="${axis}" style="cursor: ew-resize">
+      <rect x="${listenerCx - 31}" y="${earY - 44}" width="62" height="22" rx="6"
+        fill="#101820" stroke="#5ba5ff"/>
+      <text x="${listenerCx}" y="${earY - 29}" text-anchor="middle"
+        fill="#fff" font-size="11" font-weight="700">${splLabel}</text>
+      <circle cx="${listenerCx}" cy="${earY}" r="9"
+        fill="#5ba5ff" stroke="#fff" stroke-width="1.5"/>
+      <line x1="${listenerCx}" y1="${earY + 9}" x2="${listenerCx}" y2="${floorY - 8}"
         stroke="#5ba5ff" stroke-width="2"/>
     </g>
   `;
 
   svg.innerHTML = roomRect + coneSvg + earLine + floorCeilingLabels + speakersSvg + listenerSvg;
 
+  if (!appState.sectionGeom) appState.sectionGeom = {};
+  appState.sectionGeom[svgId] = {
+    axis,
+    W,
+    H,
+    ox,
+    oy,
+    roomW,
+    roomH,
+    pxPerMeter,
+    axisLengthM,
+    floorY,
+    earY
+  };
+
   const meta = document.getElementById(svgId === "sideView" ? "sideViewMeta" : "frontViewMeta");
   if (meta) {
-    const spacingFt = axis === "length" ? appState.latest?.coverage?.spacingY : appState.latest?.coverage?.spacingX;
+    const spacingFt = axis === "length"
+      ? appState.latest?.coverage?.spacingY
+      : appState.latest?.coverage?.spacingX;
+
     const spacingM = spacingFt ? spacingFt / FEET_PER_METER : 0;
+
     meta.textContent =
       `Výška místnosti ${heightM.toFixed(1)} m • rovina posluchače ${listenerHeightM.toFixed(2)} m • ` +
       `úhel ${speaker.coverageAngle.toFixed(0)}° • rozteč ${spacingM.toFixed(2)} m`;
@@ -970,8 +1024,7 @@ function drawAllSectionViews() {
     mountingHeightFt: s.mountingHeightFt,
     listenerHeightFt: s.listenerHeightFt,
     listenerXFt: appState.listenerXFt,
-    listenerYFt: appState.listenerYFt,
-    coneMode: document.getElementById("sideConeMode")?.value || "all"
+    listenerYFt: appState.listenerYFt
   });
 
   drawSectionView({
@@ -985,9 +1038,37 @@ function drawAllSectionViews() {
     mountingHeightFt: s.mountingHeightFt,
     listenerHeightFt: s.listenerHeightFt,
     listenerXFt: appState.listenerXFt,
-    listenerYFt: appState.listenerYFt,
-    coneMode: document.getElementById("frontConeMode")?.value || "all"
+    listenerYFt: appState.listenerYFt
   });
+}
+
+function pointerToSectionPosition(evt, svgId) {
+  const svg = document.getElementById(svgId);
+  const g = appState.sectionGeom?.[svgId];
+  if (!svg || !g) return null;
+
+  const rect = svg.getBoundingClientRect();
+  const px = (evt.clientX - rect.left) * (g.W / rect.width);
+  const clampedX = Math.max(g.ox, Math.min(g.ox + g.roomW, px));
+  const axisM = (clampedX - g.ox) / g.pxPerMeter;
+
+  return Math.max(0, Math.min(g.axisLengthM, axisM));
+}
+
+function updateListenerFromSection(evt, svgId) {
+  const g = appState.sectionGeom?.[svgId];
+  if (!g) return;
+
+  const axisM = pointerToSectionPosition(evt, svgId);
+  if (axisM === null) return;
+
+  if (g.axis === "length") {
+    appState.listenerYFt = axisM * FEET_PER_METER;
+  } else {
+    appState.listenerXFt = axisM * FEET_PER_METER;
+  }
+
+  refreshListenerOnly();
 }
 
 function formatMetersFromFeet(ft) {
@@ -1058,6 +1139,39 @@ function populateCoverageOptions() {
   }
   if ([...select.options].some(o => o.value === current)) select.value = current;
   else if ([...select.options].some(o => o.value === "edge-to-edge")) select.value = "edge-to-edge";
+}
+
+function getAvailableTapsForSpeaker(speaker, voltage) {
+  if (!speaker) return [];
+  const taps = voltage === "100V" ? (speaker.taps100 || []) : (speaker.taps || []);
+  return [...new Set(taps.filter(v => Number.isFinite(v) && v > 0))].sort((a,b) => a-b);
+}
+
+function populateTapOverrideOptions(speaker, voltage, preferredValue = "auto") {
+  const select = document.getElementById("tapOverride");
+  if (!select) return;
+
+  const current = select.value || preferredValue || "auto";
+  const taps = getAvailableTapsForSpeaker(speaker, voltage);
+
+  select.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "auto";
+  auto.textContent = "Automaticky – doporučený TAP";
+  select.appendChild(auto);
+
+  for (const tap of taps) {
+    const option = document.createElement("option");
+    option.value = String(tap);
+    option.textContent = `${String(tap).replace(".", ",")} W`;
+    select.appendChild(option);
+  }
+
+  if ([...select.options].some(o => o.value === current)) {
+    select.value = current;
+  } else {
+    select.value = "auto";
+  }
 }
 
 function populateSpeakerOverrideOptions() {
@@ -1343,6 +1457,7 @@ function calculate() {
   const coverageDensity = document.getElementById("coverageDensity").value;
   const speakerType = document.getElementById("speakerType").value;
   const voltage = document.getElementById("voltage").value;
+  const tapOverride = document.getElementById("tapOverride")?.value || "auto";
   const ampPriority = document.getElementById("ampPriority")?.value || "balanced";
   const dantePreference = document.getElementById("dantePreference")?.value || "any";
   const pendantHeightM = speakerType === "pendant"
@@ -1385,6 +1500,7 @@ function calculate() {
   const overrideValue = speakerOverrideSelect.value;
   const selectedModel = overrideValue === "auto" ? recommendedModel : overrideValue;
   const speaker = getSpeaker(selectedModel) || recommendedSpeaker;
+  populateTapOverrideOptions(speaker, voltage, tapOverride);
   const targetSPL = getTargetSPL(ambientNoise, useCase);
 
   const recommendedCoverage = calculateCoverage({
@@ -1424,8 +1540,22 @@ function calculate() {
     voltage
   }, coverage);
 
+  const availableTaps = getAvailableTapsForSpeaker(speaker, voltage);
+  const manualTap = tapOverride !== "auto" ? numValue(tapOverride, NaN) : NaN;
+  const selectedTap = Number.isFinite(manualTap) && availableTaps.includes(manualTap)
+    ? manualTap
+    : power.recommendedTap;
+
+  const adjustedPower = {
+    ...power,
+    recommendedTapAuto: power.recommendedTap,
+    recommendedTap: selectedTap,
+    totalPower: coverage.count * selectedTap,
+    singleSpeakerSPL: speaker.sensitivity + 10 * Math.log10(Math.max(selectedTap, 0.001))
+  };
+
   const amplifierRecommendation = recommendAmplifier({
-    zonePower: power.totalPower,
+    zonePower: adjustedPower.totalPower,
     voltage,
     useCase,
     priority: ampPriority,
@@ -1469,7 +1599,7 @@ function calculate() {
     speakerType,
     targetSPL,
     heatmap,
-    power,
+    power: adjustedPower,
     coverage,
     recommendedCoverage
   });
@@ -1501,7 +1631,9 @@ function calculate() {
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
   document.getElementById("spacingYValue").textContent = formatMetersFromFeet(coverage.spacingY);
-  document.getElementById("zonePowerValue").textContent = `${power.totalPower.toFixed(0)} W`;
+  document.getElementById("recommendedTapValue").textContent = `${power.recommendedTap.toString().replace(".", ",")} W`;
+  document.getElementById("selectedTapValue").textContent = `${selectedTap.toString().replace(".", ",")} W`;
+  document.getElementById("zonePowerValue").textContent = `${adjustedPower.totalPower.toFixed(0)} W`;
   updateAmplifierUI(amplifierRecommendation);
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
@@ -1546,10 +1678,8 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
-document.getElementById("sideConeMode")?.addEventListener("change", drawAllSectionViews);
-document.getElementById("frontConeMode")?.addEventListener("change", drawAllSectionViews);
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (["length","width"].includes(id)) {
@@ -1598,6 +1728,33 @@ svg.addEventListener("pointerup", (evt) => {
 
 svg.addEventListener("pointercancel", () => {
   appState.draggingListener = false;
+});
+
+["sideView", "frontView"].forEach(svgId => {
+  const sectionSvg = document.getElementById(svgId);
+  if (!sectionSvg) return;
+
+  sectionSvg.addEventListener("pointerdown", evt => {
+    appState.draggingSection = svgId;
+    sectionSvg.setPointerCapture?.(evt.pointerId);
+    updateListenerFromSection(evt, svgId);
+  });
+
+  sectionSvg.addEventListener("pointermove", evt => {
+    if (appState.draggingSection !== svgId) return;
+    updateListenerFromSection(evt, svgId);
+  });
+
+  sectionSvg.addEventListener("pointerup", evt => {
+    if (appState.draggingSection === svgId) {
+      updateListenerFromSection(evt, svgId);
+    }
+    appState.draggingSection = null;
+  });
+
+  sectionSvg.addEventListener("pointercancel", () => {
+    appState.draggingSection = null;
+  });
 });
 
 async function initializeApp() {

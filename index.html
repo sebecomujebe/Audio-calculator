@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.82" />
+  <link rel="stylesheet" href="style.css?v=0.84" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.82</div><div id="dataSourceStatus" class="data-source-status data-fallback">Data: lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.84</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -78,32 +78,44 @@
           </select>
         </label>
 
-        <label>
-          <span>Pozice posluchače</span>
-          <select id="listenerPosition">
-            <option value="standing">Stojící (1,68 m)</option>
-            <option value="seated">Sedící (1,22 m)</option>
-          </select>
-        </label>
+        <div class="compact-grid-2">
+          <label>
+            <span>Pozice posluchače</span>
+            <select id="listenerPosition">
+              <option value="standing">Stojící (1,68 m)</option>
+              <option value="seated">Sedící (1,22 m)</option>
+            </select>
+          </label>
 
-        <label>
-          <span>Pokrytí / overlap</span>
-          <select id="coverageDensity">
+          <label>
+            <span>Pokrytí / overlap</span>
+            <select id="coverageDensity">
             <option value="center-to-center">Střed ke středu (cca ±1 dB)</option>
             <option value="min-overlap">Minimální překrytí (cca ±2 dB)</option>
             <option value="balanced">Vyvážené překrytí (cca ±3 dB)</option>
             <option value="edge-to-edge" selected>Hrana k hraně (cca ±4 dB)</option>
             <option value="extended">Rozšířené rozestupy (cca ±7 dB)</option>
-          </select>
-        </label>
+            </select>
+          </label>
+        </div>
 
-        <label>
-          <span>Typ instalace</span>
-          <select id="speakerType">
-            <option value="ceiling">Stropní</option>
-            <option value="pendant">Závěsné</option>
-          </select>
-        </label>
+        <div class="compact-grid-2">
+          <label>
+            <span>Typ instalace</span>
+            <select id="speakerType">
+              <option value="ceiling">Stropní</option>
+              <option value="pendant">Závěsné</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Napěťový systém</span>
+            <select id="voltage">
+              <option value="100V">100 V</option>
+              <option value="70V">70 V</option>
+            </select>
+          </label>
+        </div>
 
         <label id="pendantHeightRow" class="hidden">
           <span>Výška zavěšení reproduktoru</span>
@@ -113,33 +125,27 @@
           </div>
         </label>
 
-        <label>
-          <span>Napěťový systém</span>
-          <select id="voltage">
-            <option value="100V">100 V</option>
-            <option value="70V">70 V</option>
-          </select>
-        </label>
+        <div class="compact-grid-2">
+          <label>
+            <span>Priorita zesilovače</span>
+            <select id="ampPriority">
+              <option value="balanced" selected>Vyvážená volba</option>
+              <option value="fewest">Nejmenší počet zesilovačů</option>
+              <option value="efficient">Nejmenší výkonová rezerva</option>
+              <option value="dsp">Preferovat DSP</option>
+              <option value="pro">Preferovat PRO</option>
+            </select>
+          </label>
 
-        <label>
-          <span>Priorita zesilovače</span>
-          <select id="ampPriority">
-            <option value="balanced" selected>Vyvážená volba</option>
-            <option value="fewest">Nejmenší počet zesilovačů</option>
-            <option value="efficient">Nejmenší výkonová rezerva</option>
-            <option value="dsp">Preferovat DSP</option>
-            <option value="pro">Preferovat PRO</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Dante</span>
-          <select id="dantePreference">
-            <option value="any" selected>Nezáleží</option>
-            <option value="required">Vyžadovat Dante</option>
-            <option value="exclude">Bez Dante</option>
-          </select>
-        </label>
+          <label>
+            <span>Dante</span>
+            <select id="dantePreference">
+              <option value="any" selected>Nezáleží</option>
+              <option value="required">Vyžadovat Dante</option>
+              <option value="exclude">Bez Dante</option>
+            </select>
+          </label>
+        </div>
 
         <button id="calculateBtn" type="button">Vypočítat návrh</button>
 
@@ -164,6 +170,13 @@
               <label for="speakerOverride">Zvolit jiný model</label>
               <select id="speakerOverride">
                 <option value="auto">Automaticky – doporučený model</option>
+              </select>
+            </div>
+
+            <div class="speaker-selector-wrap tap-selector-wrap">
+              <label for="tapOverride">TAP reproduktoru</label>
+              <select id="tapOverride">
+                <option value="auto">Automaticky – doporučený TAP</option>
               </select>
             </div>
           </div>
@@ -236,13 +249,7 @@
               <div class="eyebrow">ŘEZ PROSTOREM</div>
               <h2>Boční pohled</h2>
             </div>
-            <label class="view-toggle">
-              <span>Kužely</span>
-              <select id="sideConeMode">
-                <option value="all" selected>Všechny</option>
-                <option value="selected">Vybraný</option>
-              </select>
-            </label>
+            
           </div>
           <div class="section-view-wrap">
             <svg id="sideView" viewBox="0 0 900 420" role="img" aria-label="Boční pohled na místnost a kužely reproduktorů"></svg>
@@ -256,13 +263,7 @@
               <div class="eyebrow">ŘEZ PROSTOREM</div>
               <h2>Čelní pohled</h2>
             </div>
-            <label class="view-toggle">
-              <span>Kužely</span>
-              <select id="frontConeMode">
-                <option value="all" selected>Všechny</option>
-                <option value="selected">Vybraný</option>
-              </select>
-            </label>
+            
           </div>
           <div class="section-view-wrap">
             <svg id="frontView" viewBox="0 0 900 420" role="img" aria-label="Čelní pohled na místnost a kužely reproduktorů"></svg>
@@ -289,6 +290,8 @@
             <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
             <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
             <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
+            <div><dt>Doporučený TAP</dt><dd id="recommendedTapValue">—</dd></div>
+            <div><dt>Zvolený TAP</dt><dd id="selectedTapValue">—</dd></div>
             <div><dt>Celkový příkon zóny</dt><dd id="zonePowerValue">—</dd></div>
             <div><dt>Rozlišení výpočtu SPL <span class="help-text">automaticky se zhrubuje u velkých prostorů</span></dt><dd id="samplingResolutionValue">—</dd></div>
             <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
@@ -317,6 +320,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.82"></script>
+  <script src="app.js?v=0.84"></script>
 </body>
 </html>
