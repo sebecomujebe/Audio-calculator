@@ -1,4 +1,4 @@
-const APP_VERSION = "0.8";
+const APP_VERSION = "0.81";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -688,12 +688,22 @@ function prepareRenderedHeatmap(heatmap) {
 
   const stride = Math.ceil(Math.sqrt(heatmap.cells.length / maxRenderCells));
 
-  const renderedCells = heatmap.cells.filter(cell =>
-    cell.ix % stride === 0 && cell.iy % stride === 0
-  );
+  // Dříve jsme pouze vynechali mezilehlé buňky a ponechali původní nx/ny.
+  // To u velkých místností vytvořilo viditelnou "šachovnici".
+  // Teď zároveň zmenšíme vizuální mřížku a přemapujeme indexy,
+  // takže každá vykreslená buňka navazuje na sousední bez mezer.
+  const renderedCells = heatmap.cells
+    .filter(cell => cell.ix % stride === 0 && cell.iy % stride === 0)
+    .map(cell => ({
+      ...cell,
+      ix: Math.floor(cell.ix / stride),
+      iy: Math.floor(cell.iy / stride)
+    }));
 
   return {
     ...heatmap,
+    nx: Math.ceil(heatmap.nx / stride),
+    ny: Math.ceil(heatmap.ny / stride),
     cells: renderedCells,
     renderStride: stride
   };
@@ -989,7 +999,13 @@ function updateSuitabilityUI(result) {
 }
 
 
-function recommendAmplifier({zonePower, voltage, useCase}) {
+function recommendAmplifier({
+  zonePower,
+  voltage,
+  useCase,
+  priority = "balanced",
+  dantePreference = "any"
+}) {
   const uc = USE_CASES[useCase] || {};
   const headroomFactor = numValue(
     uc.ampHeadroomFactor,
@@ -999,68 +1015,121 @@ function recommendAmplifier({zonePower, voltage, useCase}) {
   const maxSplits = Math.max(1, Math.round(AMP_RULES.MAX_SPLIT_PER_ZONE || 5));
   const maxAmps = Math.max(1, Math.round(AMP_RULES.MAX_AMPS_ABSOLUTE || 8));
 
-  // SSC standardně doporučuje nedante variantu, pokud Dante není výslovně požadováno.
-  const supported = AMPLIFIERS.filter(a =>
-    !a.hasDante &&
-    (voltage === "100V" ? a.supports100V : a.supports70V)
+  let supported = AMPLIFIERS.filter(a =>
+    voltage === "100V" ? a.supports100V : a.supports70V
   );
 
-  if (!supported.length) {
-    return {found:false, requiredPower, headroomFactor};
+  if (dantePreference === "required") {
+    supported = supported.filter(a => a.hasDante);
+  } else if (dantePreference === "exclude") {
+    supported = supported.filter(a => !a.hasDante);
   }
 
-  // SSC nejprve hledá zesilovače, jejichž výkon na jednu zónu pokryje
-  // největší zónu včetně headroomu. Teprve pokud žádný takový není,
-  // vezme modely s nejvyšším dostupným výkonem na zónu a zónu rozdělí.
+  if (!supported.length) {
+    return { found: false, requiredPower, headroomFactor, reason: "filter" };
+  }
+
+  // Nejprve hledáme model, který zvládne zónu včetně výkonové rezervy
+  // na jednom efektivním výstupu. Dělení zóny použijeme až v případě,
+  // že žádný aktivní model nemá dostatečný výkon na zónu.
   let candidates = supported.filter(a => a.powerPerZone >= requiredPower);
-  if (!candidates.length) {
+  const directFitExists = candidates.length > 0;
+
+  if (!directFitExists) {
     const maxPowerPerZone = Math.max(...supported.map(a => a.powerPerZone));
     candidates = supported.filter(a => a.powerPerZone === maxPowerPerZone);
   }
 
   const evaluated = candidates.map(a => {
-    const splitsNeeded = zonePower > a.powerPerZone
-      ? Math.ceil(zonePower / a.powerPerZone)
-      : 1;
+    const splitsNeeded = directFitExists
+      ? 1
+      : Math.ceil(requiredPower / Math.max(1, a.powerPerZone));
+
     const channelsNeeded = splitsNeeded * Math.max(1, a.channelsPerZone);
-    const ampCount = Math.max(1, Math.ceil(channelsNeeded / Math.max(1, a.channels)));
+    const ampCount = Math.max(
+      1,
+      Math.ceil(channelsNeeded / Math.max(1, a.channels))
+    );
+
+    const effectiveCapacity = a.powerPerZone * splitsNeeded;
     const totalCapacity = a.totalPower * ampCount;
-    const utilization = totalCapacity > 0 ? zonePower / totalCapacity * 100 : 0;
+    const unusedZonePower = Math.max(0, effectiveCapacity - requiredPower);
+    const utilization = effectiveCapacity > 0
+      ? requiredPower / effectiveCapacity * 100
+      : 0;
 
     return {
       amp: a,
       ampCount,
       splitsNeeded,
+      effectiveCapacity,
       totalCapacity,
+      unusedZonePower,
       utilization,
-      eligible: splitsNeeded < maxSplits && ampCount <= maxAmps
+      eligible: splitsNeeded <= maxSplits && ampCount <= maxAmps
     };
   }).filter(x => x.eligible);
 
   if (!evaluated.length) {
-    return {found:false, requiredPower, headroomFactor};
+    return { found: false, requiredPower, headroomFactor, reason: "limits" };
   }
 
-  const preferPro = 1 >= (AMP_RULES.PRO_PREFER_ZONE_THRESHOLD || 1);
-
-  evaluated.sort((a,b) => {
-    if (preferPro) {
-      const aNonPro = a.amp.series === "PowerZone Connect PRO" ? 0 : 1;
-      const bNonPro = b.amp.series === "PowerZone Connect PRO" ? 0 : 1;
-      if (aNonPro !== bNonPro) return aNonPro - bNonPro;
+  evaluated.sort((a, b) => {
+    // Explicitní preference uživatele.
+    if (priority === "pro") {
+      const ap = /PRO/i.test(a.amp.series || "") ? 0 : 1;
+      const bp = /PRO/i.test(b.amp.series || "") ? 0 : 1;
+      if (ap !== bp) return ap - bp;
     }
+
+    if (priority === "dsp") {
+      const ad = a.amp.hasDSP ? 0 : 1;
+      const bd = b.amp.hasDSP ? 0 : 1;
+      if (ad !== bd) return ad - bd;
+    }
+
+    if (priority === "fewest") {
+      if (a.ampCount !== b.ampCount) return a.ampCount - b.ampCount;
+      if (a.splitsNeeded !== b.splitsNeeded) return a.splitsNeeded - b.splitsNeeded;
+    }
+
+    if (priority === "efficient") {
+      if (a.unusedZonePower !== b.unusedZonePower) {
+        return a.unusedZonePower - b.unusedZonePower;
+      }
+    }
+
+    // Výchozí "Vyvážená volba":
+    // žádná automatická priorita PRO.
     if (a.ampCount !== b.ampCount) return a.ampCount - b.ampCount;
-    if (a.amp.totalPower !== b.amp.totalPower) return a.amp.totalPower - b.amp.totalPower;
+    if (a.splitsNeeded !== b.splitsNeeded) return a.splitsNeeded - b.splitsNeeded;
+    if (a.unusedZonePower !== b.unusedZonePower) {
+      return a.unusedZonePower - b.unusedZonePower;
+    }
 
-    const aPowerZone = a.amp.series === "PowerZone" ? 1 : 0;
-    const bPowerZone = b.amp.series === "PowerZone" ? 1 : 0;
-    if (aPowerZone !== bPowerZone) return aPowerZone - bPowerZone;
+    // Pokud uživatel neřeší Dante, při shodě preferujeme běžnou variantu.
+    if (dantePreference === "any" && a.amp.hasDante !== b.amp.hasDante) {
+      return a.amp.hasDante ? 1 : -1;
+    }
 
+    // DSP je až tie-breaker, nikoli hlavní pravidlo.
     if (a.amp.hasDSP !== b.amp.hasDSP) return a.amp.hasDSP ? -1 : 1;
-    return a.amp.effectiveZones - b.amp.effectiveZones;
+
+    if (a.amp.totalPower !== b.amp.totalPower) {
+      return a.amp.totalPower - b.amp.totalPower;
+    }
+
+    return a.amp.model.localeCompare(b.amp.model, "cs");
   });
 
-  return {found:true, requiredPower, headroomFactor, ...evaluated[0]};
+  return {
+    found: true,
+    requiredPower,
+    headroomFactor,
+    priority,
+    dantePreference,
+    ...evaluated[0]
+  };
 }
 
 function updateAmplifierUI(result) {
@@ -1086,7 +1155,11 @@ function updateAmplifierUI(result) {
   capacity.textContent = `${result.totalCapacity.toFixed(0)} W`;
   utilization.textContent = `${result.utilization.toFixed(0)} %`;
   code.textContent = result.amp.avCode || "kód není v AV Integra feedu";
-  detail.textContent = `${result.splitsNeeded} výkonových výstupů pro jednu zónu; ${result.amp.powerPerZone.toFixed(0)} W na výstup, ${result.amp.effectiveZones} efektivní zóny / zesilovač.`;
+  const danteText = result.amp.hasDante ? "Dante" : "bez Dante";
+  const dspText = result.amp.hasDSP ? "DSP" : "bez DSP";
+  detail.textContent =
+    `${result.splitsNeeded} výkonový${result.splitsNeeded === 1 ? "" : "é"} výstup${result.splitsNeeded === 1 ? "" : "y"} pro zónu; ` +
+    `${result.amp.powerPerZone.toFixed(0)} W na výstup; ${dspText}, ${danteText}.`;
 }
 
 function calculate() {
@@ -1102,6 +1175,8 @@ function calculate() {
   const coverageDensity = document.getElementById("coverageDensity").value;
   const speakerType = document.getElementById("speakerType").value;
   const voltage = document.getElementById("voltage").value;
+  const ampPriority = document.getElementById("ampPriority")?.value || "balanced";
+  const dantePreference = document.getElementById("dantePreference")?.value || "any";
   const pendantHeightM = speakerType === "pendant"
     ? Number(document.getElementById("pendantHeight").value)
     : 0;
@@ -1184,7 +1259,9 @@ function calculate() {
   const amplifierRecommendation = recommendAmplifier({
     zonePower: power.totalPower,
     voltage,
-    useCase
+    useCase,
+    priority: ampPriority,
+    dantePreference
   });
 
   // Adaptivní přesná síť pro heatmapu i všechny statistiky.
@@ -1300,7 +1377,7 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (["length","width"].includes(id)) {

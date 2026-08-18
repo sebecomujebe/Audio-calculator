@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.8" />
+  <link rel="stylesheet" href="style.css?v=0.81" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.8</div><div id="dataSourceStatus" class="data-source-status data-fallback">Data: lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.81</div><div id="dataSourceStatus" class="data-source-status data-fallback">Data: lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -118,6 +118,26 @@
           <select id="voltage">
             <option value="100V">100 V</option>
             <option value="70V">70 V</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Priorita zesilovače</span>
+          <select id="ampPriority">
+            <option value="balanced" selected>Vyvážená volba</option>
+            <option value="fewest">Nejmenší počet zesilovačů</option>
+            <option value="efficient">Nejmenší výkonová rezerva</option>
+            <option value="dsp">Preferovat DSP</option>
+            <option value="pro">Preferovat PRO</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Dante</span>
+          <select id="dantePreference">
+            <option value="any" selected>Nezáleží</option>
+            <option value="required">Vyžadovat Dante</option>
+            <option value="exclude">Bez Dante</option>
           </select>
         </label>
 
@@ -256,6 +276,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.8"></script>
+  <script src="app.js?v=0.81"></script>
 </body>
 </html>
