@@ -1,4 +1,4 @@
-const APP_VERSION = "0.71";
+const APP_VERSION = "0.71.1";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -412,35 +412,6 @@ function calculateHeatmap({
     stepYM: actualStepYM,
     points: cells.length
   };
-}) {
-  const nx = 30;
-  const ny = 30;
-  const cells = [];
-  let min = Infinity;
-  let max = -Infinity;
-  let sum = 0;
-
-  for (let iy = 0; iy < ny; iy++) {
-    for (let ix = 0; ix < nx; ix++) {
-      const xFt = widthFt * (ix + 0.5) / nx;
-      const yFt = lengthFt * (iy + 0.5) / ny;
-      const spl = calculateSPLAtPoint({
-        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
-      });
-      cells.push({ix, iy, spl});
-      min = Math.min(min, spl);
-      max = Math.max(max, spl);
-      sum += spl;
-    }
-  }
-
-  return {
-    nx, ny, cells,
-    min,
-    max,
-    average: sum / cells.length,
-    spread: max - min
-  };
 }
 
 
@@ -463,43 +434,8 @@ function calculateVisualHeatmap({
     speaker,
     tap
   });
-}) {
-  // Grafická mřížka má stejnou fyzickou velikost buněk v obou osách,
-  // takže u dlouhých místností nevznikají velmi široké obdélníky.
-  const longestSide = Math.max(lengthFt, widthFt);
-  const targetLongAxisCells = 48;
-  const cellSizeFt = longestSide / targetLongAxisCells;
-
-  const nx = Math.max(12, Math.min(60, Math.round(widthFt / cellSizeFt)));
-  const ny = Math.max(12, Math.min(60, Math.round(lengthFt / cellSizeFt)));
-
-  const cells = [];
-  let min = Infinity;
-  let max = -Infinity;
-  let sum = 0;
-
-  for (let iy = 0; iy < ny; iy++) {
-    for (let ix = 0; ix < nx; ix++) {
-      const xFt = widthFt * (ix + 0.5) / nx;
-      const yFt = lengthFt * (iy + 0.5) / ny;
-      const spl = calculateSPLAtPoint({
-        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
-      });
-      cells.push({ix, iy, spl});
-      min = Math.min(min, spl);
-      max = Math.max(max, spl);
-      sum += spl;
-    }
-  }
-
-  return {
-    nx, ny, cells,
-    min,
-    max,
-    average: sum / cells.length,
-    spread: max - min
-  };
 }
+
 
 function heatColor(value, min, max) {
   const span = Math.max(0.001, max - min);
