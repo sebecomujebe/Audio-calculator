@@ -1,4 +1,4 @@
-const APP_VERSION = "0.4";
+const APP_VERSION = "0.5";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -27,12 +27,12 @@ const HEADROOM_BY_APPLICATION = {
 };
 
 const USE_CASES = {
-  foreground: { label: "Foreground Music", targetSPL: 85, snrAboveAmbient: 10 },
-  speech: { label: "Speech Reinforcement", targetSPL: 78, snrAboveAmbient: 15 },
-  paging: { label: "Paging / Announcement", targetSPL: 80, snrAboveAmbient: 15 },
-  general: { label: "General Purpose", targetSPL: 80, snrAboveAmbient: 12 },
-  background: { label: "Background Music", targetSPL: 75, snrAboveAmbient: 6 },
-  utility: { label: "Utility", targetSPL: 70, snrAboveAmbient: 5 },
+  foreground: { label: "Hlavní hudební ozvučení", targetSPL: 85, snrAboveAmbient: 10 },
+  speech: { label: "Zesílení řeči", targetSPL: 78, snrAboveAmbient: 15 },
+  paging: { label: "Hlášení / oznámení", targetSPL: 80, snrAboveAmbient: 15 },
+  general: { label: "Univerzální ozvučení", targetSPL: 80, snrAboveAmbient: 12 },
+  background: { label: "Hudba na pozadí", targetSPL: 75, snrAboveAmbient: 6 },
+  utility: { label: "Jednoduché užitkové ozvučení", targetSPL: 70, snrAboveAmbient: 5 },
 };
 
 const SPEAKERS = [
@@ -163,11 +163,11 @@ function calculateCoverage({
   ) / 100;
 
   const densityModes = {
-    "center-to-center": { multiplier: 0.5, variation: 1, label: "Center-to-center" },
-    "min-overlap": { multiplier: 0.707, variation: 2, label: "Minimum overlap" },
-    "balanced": { multiplier: 0.85, variation: 3, label: "Balanced" },
-    "edge-to-edge": { multiplier: 1, variation: 4, label: "Edge-to-edge" },
-    "extended": { multiplier: 1.4, variation: 7, label: "Extended" }
+    "center-to-center": { multiplier: 0.5, variation: 1, label: "Střed ke středu" },
+    "min-overlap": { multiplier: 0.707, variation: 2, label: "Minimální překrytí" },
+    "balanced": { multiplier: 0.85, variation: 3, label: "Vyvážené překrytí" },
+    "edge-to-edge": { multiplier: 1, variation: 4, label: "Hrana k hraně" },
+    "extended": { multiplier: 1.4, variation: 7, label: "Rozšířené rozestupy" }
   };
 
   const density = densityModes[coverageDensity] || densityModes["min-overlap"];
@@ -622,7 +622,13 @@ function calculate() {
   });
 
   const recommendedSpeaker = getSpeaker(recommendedModel);
-  const overrideValue = document.getElementById("speakerOverride").value;
+  const speakerOverrideSelect = document.getElementById("speakerOverride");
+  const autoOption = [...speakerOverrideSelect.options].find(o => o.value === "auto");
+  if (autoOption) {
+    autoOption.textContent = `Automaticky – ${recommendedModel} (doporučený model)`;
+  }
+
+  const overrideValue = speakerOverrideSelect.value;
   const selectedModel = overrideValue === "auto" ? recommendedModel : overrideValue;
   const speaker = getSpeaker(selectedModel) || recommendedSpeaker;
   const targetSPL = getTargetSPL(ambientNoise, useCase);
@@ -715,6 +721,12 @@ function calculate() {
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
+  const uc = USE_CASES[useCase];
+  const ambientBased = ambientNoise + uc.snrAboveAmbient;
+  const basisText = targetSPL > uc.targetSPL
+    ? `${ambientNoise.toFixed(0)} dB hluk + ${uc.snrAboveAmbient} dB rezerva`
+    : `${uc.label} = ${uc.targetSPL} dB`;
+  document.getElementById("targetSplBasisValue").textContent = basisText;
   document.getElementById("coverageModeValue").textContent =
     `${coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);

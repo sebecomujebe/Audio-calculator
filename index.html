@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.4" />
+  <link rel="stylesheet" href="style.css?v=0.5" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.4</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.5</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -77,11 +77,11 @@
         <label>
           <span>Pokrytí / overlap</span>
           <select id="coverageDensity">
-            <option value="edge-to-edge">Edge-to-edge (cca ±4 dB)</option>
-            <option value="min-overlap">Minimum overlap (cca ±2 dB)</option>
-            <option value="center-to-center">Center-to-center (cca ±1 dB)</option>
-            <option value="balanced">Balanced (cca ±3 dB)</option>
-            <option value="extended">Extended (cca ±7 dB)</option>
+            <option value="edge-to-edge">Hrana k hraně (cca ±4 dB)</option>
+            <option value="min-overlap">Minimální překrytí (cca ±2 dB)</option>
+            <option value="center-to-center">Střed ke středu (cca ±1 dB)</option>
+            <option value="balanced">Vyvážené překrytí (cca ±3 dB)</option>
+            <option value="extended">Rozšířené rozestupy (cca ±7 dB)</option>
           </select>
         </label>
 
@@ -150,7 +150,7 @@
               <strong id="tapValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">SPL u posluchače</span>
+              <span class="stat-label">SPL v místě posluchače</span>
               <strong id="listenerSplValue">—</strong>
             </div>
             <div class="stat">
@@ -158,15 +158,15 @@
               <strong id="averageSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Minimum SPL</span>
+              <span class="stat-label">Minimální SPL</span>
               <strong id="minimumSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Maximum SPL</span>
+              <span class="stat-label">Maximální SPL</span>
               <strong id="maximumSplValue">—</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">Rozptyl max–min</span>
+              <span class="stat-label">Rozdíl max–min</span>
               <strong id="spreadSplValue">—</strong>
             </div>
           </div>
@@ -205,13 +205,14 @@
 
           <dl class="summary-list">
             <div><dt>Doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
-            <div><dt>Cílové SPL</dt><dd id="targetSplValue">75 dB</dd></div>
-            <div><dt>Pokrytí / očekávaná variace</dt><dd id="coverageModeValue">—</dd></div>
+            <div class="summary-explained"><dt>Cílové SPL <span class="help-text">vychází z typu použití a okolního hluku</span></dt><dd id="targetSplValue">75 dB</dd></div>
+            <div><dt>Výpočet cílového SPL</dt><dd id="targetSplBasisValue">—</dd></div>
+            <div><dt>Režim pokrytí / očekávaná odchylka</dt><dd id="coverageModeValue">—</dd></div>
             <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
-            <div><dt>Průměr pokrytí jednoho repro</dt><dd id="coverageDiameterValue">—</dd></div>
+            <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
             <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
             <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
-            <div><dt>Celkový výkon zóny</dt><dd id="zonePowerValue">—</dd></div>
+            <div><dt>Celkový příkon zóny</dt><dd id="zonePowerValue">—</dd></div>
             <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
           </dl>
         </div>
@@ -219,6 +220,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.4"></script>
+  <script src="app.js?v=0.5"></script>
 </body>
 </html>
