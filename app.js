@@ -1962,8 +1962,23 @@ async function initializeApp() {
   populateUseCaseOptions();
   populateCoverageOptions();
   populateSpeakerOverrideOptions();
-  await loadPriceData();
+
+  // Kalkulátor se musí spustit bez ohledu na dostupnost cenového endpointu.
   calculate();
+
+  // Ceny načítáme nezávisle na pozadí. Po načtení pouze obnovíme
+  // cenové shrnutí; výpočtová logika na cenách nijak nezávisí.
+  loadPriceData().then(() => {
+    const s = appState.latest;
+    if (!s) return;
+    updatePriceSummary({
+      speaker: s.speaker,
+      speakerCount: s.coverage.count,
+      amplifierRecommendation: s.amplifierRecommendation
+    });
+  }).catch(error => {
+    console.warn("Price feed unavailable:", error);
+  });
 }
 
 initializeApp();
