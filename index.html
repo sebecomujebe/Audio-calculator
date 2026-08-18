@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audio Calculator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div>
+        <h1>Návrh ozvučení prostoru</h1>
+        <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="panel form-panel">
+        <h2>1. Parametry prostoru</h2>
+
+        <div class="grid-2">
+          <label>
+            <span>Délka místnosti</span>
+            <div class="field-with-unit">
+              <input id="length" type="number" min="1" step="0.1" value="12" />
+              <span>m</span>
+            </div>
+          </label>
+
+          <label>
+            <span>Šířka místnosti</span>
+            <div class="field-with-unit">
+              <input id="width" type="number" min="1" step="0.1" value="8" />
+              <span>m</span>
+            </div>
+          </label>
+
+          <label>
+            <span>Výška místnosti</span>
+            <div class="field-with-unit">
+              <input id="height" type="number" min="2" step="0.1" value="3.2" />
+              <span>m</span>
+            </div>
+          </label>
+
+          <label>
+            <span>Okolní hluk</span>
+            <div class="field-with-unit">
+              <input id="ambientNoise" type="number" min="30" max="100" step="1" value="55" />
+              <span>dB</span>
+            </div>
+          </label>
+        </div>
+
+        <label>
+          <span>Použití</span>
+          <select id="useCase">
+            <option value="background">Background Music</option>
+            <option value="foreground">Foreground Music</option>
+            <option value="general">General Purpose</option>
+            <option value="speech">Speech Reinforcement</option>
+            <option value="paging">Paging / Announcement</option>
+            <option value="utility">Utility</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Typ instalace</span>
+          <select id="speakerType">
+            <option value="ceiling">Stropní</option>
+            <option value="pendant">Závěsné</option>
+          </select>
+        </label>
+
+        <label id="pendantHeightRow" class="hidden">
+          <span>Výška zavěšení reproduktoru</span>
+          <div class="field-with-unit">
+            <input id="pendantHeight" type="number" min="2" step="0.1" value="3" />
+            <span>m</span>
+          </div>
+        </label>
+
+        <label>
+          <span>Napěťový systém</span>
+          <select id="voltage">
+            <option value="100V">100 V</option>
+            <option value="70V">70 V</option>
+          </select>
+        </label>
+
+        <button id="calculateBtn" type="button">Vypočítat návrh</button>
+
+        <p class="note">
+          Výsledek je orientační návrh založený na výpočtové logice Sonance SSC. Finální instalace má být ověřena projektantem / instalační firmou.
+        </p>
+      </aside>
+
+      <section class="results-column">
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">VÝSLEDEK</div>
+              <h2 id="resultTitle">Sonance PS-C63RT</h2>
+            </div>
+            <div id="statusBadge" class="badge">Doporučený návrh</div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <span class="stat-label">Počet repro</span>
+              <strong id="speakerCount">6 ks</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Rozmístění</span>
+              <strong id="layoutValue">3 × 2</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Tap</span>
+              <strong id="tapValue">15 W</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Kombinované SPL</span>
+              <strong id="splValue">—</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel floor-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">PŮDORYS</div>
+              <h2>Rozmístění reproduktorů</h2>
+            </div>
+          </div>
+
+          <div id="floorPlanWrap" class="floor-wrap">
+            <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
+          </div>
+
+          <div class="legend">
+            <span><i class="legend-dot speaker-dot"></i> reproduktor</span>
+            <span><i class="legend-dot listener-dot"></i> referenční posluchač</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">TECHNICKÝ SOUHRN</div>
+              <h2>Parametry návrhu</h2>
+            </div>
+          </div>
+
+          <dl class="summary-list">
+            <div><dt>Cílové SPL</dt><dd id="targetSplValue">75 dB</dd></div>
+            <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
+            <div><dt>Průměr pokrytí jednoho repro</dt><dd id="coverageDiameterValue">—</dd></div>
+            <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
+            <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
+            <div><dt>Celkový výkon zóny</dt><dd id="zonePowerValue">—</dd></div>
+          </dl>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
