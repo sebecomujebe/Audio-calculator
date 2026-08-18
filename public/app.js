@@ -1,4 +1,4 @@
-const APP_VERSION = "0.94";
+const APP_VERSION = "0.95";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2215,6 +2215,48 @@ function recommendAmplifier({
   };
 }
 
+
+function formatCoordinateMeters(valueFt) {
+  return `${(valueFt / FEET_PER_METER).toFixed(2).replace(".", ",")} m`;
+}
+
+function updateSpeakerCoordinatesTable(placements) {
+  const body = document.getElementById("speakerCoordinatesBody");
+  if (!body) return;
+
+  if (!placements?.length) {
+    body.innerHTML = `<tr><td colspan="3">—</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = placements.map((p, index) => `
+    <tr data-speaker-index="${index}">
+      <td><strong>${index + 1}</strong></td>
+      <td>${formatCoordinateMeters(p.x)}</td>
+      <td>${formatCoordinateMeters(p.y)}</td>
+    </tr>
+  `).join("");
+}
+
+function getSpeakerCoordinatesText() {
+  const placements = appState.latest?.placements || [];
+  if (!placements.length) return "";
+
+  const lines = [
+    "Souřadnice reproduktorů",
+    "Počátek: levý horní roh obálky půdorysu",
+    ""
+  ];
+
+  placements.forEach((p, index) => {
+    lines.push(
+      `Repro ${index + 1}: X ${(p.x / FEET_PER_METER).toFixed(2).replace(".", ",")} m; ` +
+      `Y ${(p.y / FEET_PER_METER).toFixed(2).replace(".", ",")} m`
+    );
+  });
+
+  return lines.join("\n");
+}
 function updateAmplifierUI(result) {
   const model = document.getElementById("amplifierModelValue");
   const required = document.getElementById("amplifierRequiredPowerValue");
@@ -2460,10 +2502,15 @@ function calculate() {
   };
   document.getElementById("coverageModeValue").textContent =
     `${coverageNames[coverageDensity] || coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
+  const optimizationImprovementText =
+    Number.isFinite(placementOptimization.improvementPct)
+      ? ` • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
+      : "";
+
   document.getElementById("placementOptimizationValue").textContent =
     room.shape === "rectangle"
       ? "Pravidelná mřížka"
-      : `${placementOptimization.method} • odstup od stěn min. ${placementOptimization.clearanceM.toFixed(2).replace(".", ",")} m`;
+      : `${placementOptimization.method}${optimizationImprovementText}`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -2475,6 +2522,7 @@ function calculate() {
   updatePriceSummary({ speaker, speakerCount: effectiveCoverage.count, amplifierRecommendation });
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
+  updateSpeakerCoordinatesTable(placements);
 
   appState.latest = {
     lengthM, widthM, heightM, lengthFt, widthFt,
@@ -2516,6 +2564,34 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 });
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
+
+document.getElementById("copySpeakerCoordinates")?.addEventListener("click", async () => {
+  const text = getSpeakerCoordinatesText();
+  if (!text) return;
+
+  const button = document.getElementById("copySpeakerCoordinates");
+  const originalText = button?.textContent || "Kopírovat souřadnice";
+
+  try {
+    await navigator.clipboard.writeText(text);
+    if (button) button.textContent = "Zkopírováno";
+  } catch (_) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+    if (button) button.textContent = "Zkopírováno";
+  }
+
+  setTimeout(() => {
+    if (button) button.textContent = originalText;
+  }, 1400);
+});
+
 
 document.getElementById("roomShape")?.addEventListener("change", () => {
   updateRoomShapeUi();

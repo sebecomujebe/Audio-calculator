@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.94" />
+  <link rel="stylesheet" href="style.css?v=0.95" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.94</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.95</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -355,6 +355,35 @@
           </dl>
         </div>
 
+        <div class="panel speaker-coordinates-panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">MONTÁŽNÍ SOUŘADNICE</div>
+              <h2>Souřadnice reproduktorů</h2>
+            </div>
+            <button id="copySpeakerCoordinates" type="button" class="secondary-button small-button">Kopírovat souřadnice</button>
+          </div>
+
+          <p class="coordinates-note">
+            Souřadnice jsou měřeny ke středu reproduktoru od levého horního rohu obálky půdorysu.
+          </p>
+
+          <div class="coordinates-table-wrap">
+            <table class="coordinates-table">
+              <thead>
+                <tr>
+                  <th>Repro</th>
+                  <th>X od levého okraje</th>
+                  <th>Y od horního okraje</th>
+                </tr>
+              </thead>
+              <tbody id="speakerCoordinatesBody">
+                <tr><td colspan="3">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="panel amplifier-panel">
           <div class="section-heading">
             <div>
@@ -415,6 +444,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.94"></script>
+  <script src="app.js?v=0.95"></script>
 </body>
 </html>
