@@ -1,4 +1,4 @@
-const APP_VERSION = "0.81";
+const APP_VERSION = "0.82";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -823,6 +823,173 @@ function drawFloorPlan({
   };
 }
 
+function conePolygonPoints(cx, topY, bottomY, halfWidth) {
+  return `${cx},${topY} ${cx - halfWidth},${bottomY} ${cx + halfWidth},${bottomY}`;
+}
+
+function drawSectionView({
+  svgId,
+  axis,
+  lengthM,
+  widthM,
+  heightM,
+  placements,
+  speaker,
+  mountingHeightFt,
+  listenerHeightFt,
+  listenerXFt,
+  listenerYFt,
+  coneMode = "all"
+}) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+
+  const W = 900;
+  const H = 420;
+  const padX = 64;
+  const padTop = 48;
+  const padBottom = 60;
+
+  const axisLengthM = axis === "length" ? lengthM : widthM;
+  const roomW = W - padX * 2;
+  const roomH = H - padTop - padBottom;
+  const ox = padX;
+  const oy = padTop;
+
+  const xScale = roomW / Math.max(0.1, axisLengthM);
+  const yScale = roomH / Math.max(0.1, heightM);
+
+  const floorY = oy + roomH;
+  const ceilingY = oy;
+
+  const mountHeightM = mountingHeightFt / FEET_PER_METER;
+  const listenerHeightM = listenerHeightFt / FEET_PER_METER;
+  const speakerY = floorY - mountHeightM * yScale;
+  const earY = floorY - listenerHeightM * yScale;
+
+  const halfAngleRad = Math.max(1, Math.min(179, speaker.coverageAngle)) * Math.PI / 360;
+  const verticalDistanceToEarM = Math.max(0.05, mountHeightM - listenerHeightM);
+  const halfCoverageAtEarM = Math.tan(halfAngleRad) * verticalDistanceToEarM;
+
+  const uniqueAxisPositions = [...new Set(
+    placements.map(p => {
+      const ft = axis === "length" ? p.y : p.x;
+      return Number((ft / FEET_PER_METER).toFixed(4));
+    })
+  )].sort((a,b) => a-b);
+
+  const listenerAxisM = (axis === "length" ? listenerYFt : listenerXFt) / FEET_PER_METER;
+  let selectedIndex = 0;
+  if (uniqueAxisPositions.length) {
+    selectedIndex = uniqueAxisPositions.reduce((bestIdx, pos, idx, arr) =>
+      Math.abs(pos - listenerAxisM) < Math.abs(arr[bestIdx] - listenerAxisM) ? idx : bestIdx
+    , 0);
+  }
+
+  const roomRect = `<rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"
+    fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+
+  const earLine = `
+    <line x1="${ox}" y1="${earY}" x2="${ox + roomW}" y2="${earY}"
+      stroke="#79aef7" stroke-width="1.4" stroke-dasharray="7 7" opacity="0.8"/>
+    <text x="${ox + 8}" y="${earY - 8}" fill="#9bc2f7" font-size="11">
+      rovina uší ${listenerHeightM.toFixed(2)} m
+    </text>
+  `;
+
+  const floorCeilingLabels = `
+    <text x="${ox - 10}" y="${ceilingY + 4}" text-anchor="end" fill="#9ba8b7" font-size="11">strop</text>
+    <text x="${ox - 10}" y="${floorY}" text-anchor="end" fill="#9ba8b7" font-size="11">podlaha</text>
+    <text x="${W/2}" y="${floorY + 34}" text-anchor="middle" fill="#9ba8b7" font-size="12">
+      ${axis === "length" ? "délka" : "šířka"} ${axisLengthM.toFixed(1)} m
+    </text>
+    <text x="${ox - 34}" y="${oy + roomH/2}" text-anchor="middle" fill="#9ba8b7" font-size="12"
+      transform="rotate(-90 ${ox - 34} ${oy + roomH/2})">
+      výška ${heightM.toFixed(1)} m
+    </text>
+  `;
+
+  const coneSvg = uniqueAxisPositions.map((posM, idx) => {
+    if (coneMode === "selected" && idx !== selectedIndex) return "";
+    const cx = ox + posM * xScale;
+    const bottomY = earY;
+    const halfWidthPx = halfCoverageAtEarM * xScale;
+    const pts = conePolygonPoints(cx, speakerY, bottomY, halfWidthPx);
+    const opacity = coneMode === "selected" ? 0.24 : 0.10;
+    return `
+      <polygon points="${pts}" fill="rgba(255,122,26,${opacity})"
+        stroke="rgba(255,150,70,0.65)" stroke-width="1.2"/>
+    `;
+  }).join("");
+
+  const speakersSvg = uniqueAxisPositions.map((posM, idx) => {
+    const cx = ox + posM * xScale;
+    const selected = idx === selectedIndex;
+    return `
+      <g>
+        <line x1="${cx}" y1="${ceilingY}" x2="${cx}" y2="${speakerY}" stroke="#5c6672" stroke-width="1"/>
+        <circle cx="${cx}" cy="${speakerY}" r="${selected ? 8 : 6}" fill="#ff7a1a"
+          stroke="${selected ? "#fff" : "#ffd5b7"}" stroke-width="${selected ? 2 : 1.2}"/>
+      </g>
+    `;
+  }).join("");
+
+  const listenerCx = ox + listenerAxisM * xScale;
+  const listenerSvg = `
+    <g>
+      <circle cx="${listenerCx}" cy="${earY}" r="8" fill="#5ba5ff" stroke="#fff" stroke-width="1.5"/>
+      <line x1="${listenerCx}" y1="${earY + 8}" x2="${listenerCx}" y2="${floorY - 8}"
+        stroke="#5ba5ff" stroke-width="2"/>
+    </g>
+  `;
+
+  svg.innerHTML = roomRect + coneSvg + earLine + floorCeilingLabels + speakersSvg + listenerSvg;
+
+  const meta = document.getElementById(svgId === "sideView" ? "sideViewMeta" : "frontViewMeta");
+  if (meta) {
+    const spacingFt = axis === "length" ? appState.latest?.coverage?.spacingY : appState.latest?.coverage?.spacingX;
+    const spacingM = spacingFt ? spacingFt / FEET_PER_METER : 0;
+    meta.textContent =
+      `Výška místnosti ${heightM.toFixed(1)} m • rovina posluchače ${listenerHeightM.toFixed(2)} m • ` +
+      `úhel ${speaker.coverageAngle.toFixed(0)}° • rozteč ${spacingM.toFixed(2)} m`;
+  }
+}
+
+function drawAllSectionViews() {
+  const s = appState.latest;
+  if (!s) return;
+
+  drawSectionView({
+    svgId: "sideView",
+    axis: "length",
+    lengthM: s.lengthM,
+    widthM: s.widthM,
+    heightM: s.heightM,
+    placements: s.placements,
+    speaker: s.speaker,
+    mountingHeightFt: s.mountingHeightFt,
+    listenerHeightFt: s.listenerHeightFt,
+    listenerXFt: appState.listenerXFt,
+    listenerYFt: appState.listenerYFt,
+    coneMode: document.getElementById("sideConeMode")?.value || "all"
+  });
+
+  drawSectionView({
+    svgId: "frontView",
+    axis: "width",
+    lengthM: s.lengthM,
+    widthM: s.widthM,
+    heightM: s.heightM,
+    placements: s.placements,
+    speaker: s.speaker,
+    mountingHeightFt: s.mountingHeightFt,
+    listenerHeightFt: s.listenerHeightFt,
+    listenerXFt: appState.listenerXFt,
+    listenerYFt: appState.listenerYFt,
+    coneMode: document.getElementById("frontConeMode")?.value || "all"
+  });
+}
+
 function formatMetersFromFeet(ft) {
   return (ft / FEET_PER_METER).toFixed(2) + " m";
 }
@@ -858,6 +1025,7 @@ function refreshListenerOnly() {
     listenerYFt: appState.listenerYFt,
     listenerSPL
   });
+  drawAllSectionViews();
 }
 
 
@@ -1339,7 +1507,7 @@ function calculate() {
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
 
   appState.latest = {
-    lengthM, widthM, lengthFt, widthFt,
+    lengthM, widthM, heightM, lengthFt, widthFt,
     placements, coverage, speaker, power, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
     listenerHeightFt, mountingHeightFt
@@ -1358,6 +1526,7 @@ function calculate() {
     listenerYFt: appState.listenerYFt,
     listenerSPL
   });
+  drawAllSectionViews();
 }
 
 populateSpeakerOverrideOptions();
@@ -1376,6 +1545,9 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 });
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
+
+document.getElementById("sideConeMode")?.addEventListener("change", drawAllSectionViews);
+document.getElementById("frontConeMode")?.addEventListener("change", drawAllSectionViews);
 
 ["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference"]
   .forEach(id => {

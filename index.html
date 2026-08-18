@@ -4,20 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.81" />
+  <link rel="stylesheet" href="style.css?v=0.82" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.81</div><div id="dataSourceStatus" class="data-source-status data-fallback">Data: lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.82</div><div id="dataSourceStatus" class="data-source-status data-fallback">Data: lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný Sonance reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
     </section>
 
     <section class="layout">
-      <aside class="panel form-panel">
+      <aside class="panel form-panel compact-form-panel">
         <h2>1. Parametry prostoru</h2>
 
         <div class="grid-2">
@@ -229,6 +229,47 @@
           </div>
         </div>
 
+
+        <div class="panel section-view-panel">
+          <div class="section-heading result-heading">
+            <div>
+              <div class="eyebrow">ŘEZ PROSTOREM</div>
+              <h2>Boční pohled</h2>
+            </div>
+            <label class="view-toggle">
+              <span>Kužely</span>
+              <select id="sideConeMode">
+                <option value="all" selected>Všechny</option>
+                <option value="selected">Vybraný</option>
+              </select>
+            </label>
+          </div>
+          <div class="section-view-wrap">
+            <svg id="sideView" viewBox="0 0 900 420" role="img" aria-label="Boční pohled na místnost a kužely reproduktorů"></svg>
+          </div>
+          <div class="section-meta" id="sideViewMeta">—</div>
+        </div>
+
+        <div class="panel section-view-panel">
+          <div class="section-heading result-heading">
+            <div>
+              <div class="eyebrow">ŘEZ PROSTOREM</div>
+              <h2>Čelní pohled</h2>
+            </div>
+            <label class="view-toggle">
+              <span>Kužely</span>
+              <select id="frontConeMode">
+                <option value="all" selected>Všechny</option>
+                <option value="selected">Vybraný</option>
+              </select>
+            </label>
+          </div>
+          <div class="section-view-wrap">
+            <svg id="frontView" viewBox="0 0 900 420" role="img" aria-label="Čelní pohled na místnost a kužely reproduktorů"></svg>
+          </div>
+          <div class="section-meta" id="frontViewMeta">—</div>
+        </div>
+
         <div class="panel">
           <div class="section-heading">
             <div>
@@ -276,6 +317,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.81"></script>
+  <script src="app.js?v=0.82"></script>
 </body>
 </html>
