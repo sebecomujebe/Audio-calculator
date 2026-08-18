@@ -1,4 +1,4 @@
-const APP_VERSION = "0.84";
+const APP_VERSION = "0.85";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -1147,7 +1147,7 @@ function getAvailableTapsForSpeaker(speaker, voltage) {
   return [...new Set(taps.filter(v => Number.isFinite(v) && v > 0))].sort((a,b) => a-b);
 }
 
-function populateTapOverrideOptions(speaker, voltage, preferredValue = "auto") {
+function populateTapOverrideOptions(speaker, voltage, preferredValue = "auto", autoTap = null) {
   const select = document.getElementById("tapOverride");
   if (!select) return;
 
@@ -1157,7 +1157,9 @@ function populateTapOverrideOptions(speaker, voltage, preferredValue = "auto") {
   select.innerHTML = "";
   const auto = document.createElement("option");
   auto.value = "auto";
-  auto.textContent = "Automaticky – doporučený TAP";
+  auto.textContent = Number.isFinite(autoTap)
+    ? `Automaticky – ${String(autoTap).replace(".", ",")} W`
+    : "Automaticky";
   select.appendChild(auto);
 
   for (const tap of taps) {
@@ -1422,7 +1424,8 @@ function updateAmplifierUI(result) {
   const code = document.getElementById("amplifierCodeValue");
   const detail = document.getElementById("amplifierDetail");
 
-  required.textContent = `${result.requiredPower.toFixed(0)} W (${result.headroomFactor.toFixed(2)}× rezerva)`;
+    const reservePct = Math.max(0, Math.round((result.headroomFactor - 1) * 100));
+  required.textContent = `Požadovaný výkon včetně ${reservePct}% rezervy: ${result.requiredPower.toFixed(0)} W`;
 
   if (!result.found) {
     model.textContent = "Nenalezen vhodný model";
@@ -1500,7 +1503,6 @@ function calculate() {
   const overrideValue = speakerOverrideSelect.value;
   const selectedModel = overrideValue === "auto" ? recommendedModel : overrideValue;
   const speaker = getSpeaker(selectedModel) || recommendedSpeaker;
-  populateTapOverrideOptions(speaker, voltage, tapOverride);
   const targetSPL = getTargetSPL(ambientNoise, useCase);
 
   const recommendedCoverage = calculateCoverage({
@@ -1546,6 +1548,8 @@ function calculate() {
     ? manualTap
     : power.recommendedTap;
 
+  populateTapOverrideOptions(speaker, voltage, tapOverride, power.recommendedTap);
+
   const adjustedPower = {
     ...power,
     recommendedTapAuto: power.recommendedTap,
@@ -1570,7 +1574,7 @@ function calculate() {
     mountingHeightFt,
     listenerHeightFt,
     speaker,
-    tap: power.recommendedTap
+    tap: selectedTap
   });
 
   const visualHeatmap = prepareRenderedHeatmap(heatmap);
@@ -1590,7 +1594,7 @@ function calculate() {
     placements,
     mountingHeightFt,
     speaker,
-    tap: power.recommendedTap
+    tap: selectedTap
   });
 
   const suitability = evaluateSpeakerSuitability({
@@ -1614,8 +1618,6 @@ function calculate() {
   document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
   document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
   document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
-  document.getElementById("samplingResolutionValue").textContent =
-    `${heatmap.stepXM.toFixed(2)} × ${heatmap.stepYM.toFixed(2)} m (${heatmap.points.toLocaleString("cs-CZ")} bodů)`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   const uc = USE_CASES[useCase];

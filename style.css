@@ -709,3 +709,14 @@ input[type="number"]::-webkit-outer-spin-button {
 .view-toggle {
   display: none !important;
 }
+
+
+/* v0.85 */
+.amp-required-row dt {
+  display: none;
+}
+.amp-required-row dd {
+  grid-column: 1 / -1;
+  text-align: left;
+  font-weight: 700;
+}
