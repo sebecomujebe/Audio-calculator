@@ -1,4 +1,4 @@
-const APP_VERSION = "0.86";
+const APP_VERSION = "0.87";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -709,11 +709,60 @@ function prepareRenderedHeatmap(heatmap) {
   };
 }
 
-function heatColor(value, min, max) {
-  const span = Math.max(0.001, max - min);
-  const t = Math.max(0, Math.min(1, (value - min) / span));
-  const hue = 220 - 212 * t;
-  return `hsl(${hue} 82% 52%)`;
+function heatColor(value, min, max, mode = "absolute") {
+  let t;
+
+  if (mode === "relative") {
+    const span = Math.max(0.001, max - min);
+    t = Math.max(0, Math.min(1, (value - min) / span));
+  } else {
+    // Absolutní SPL stupnice:
+    // cca 60 dB = modrá, 75 dB = tyrkys/zelená,
+    // 85 dB = zelenožlutá, 95 dB = žlutá/oranžová,
+    // 105–110+ dB = červená.
+    const absoluteMin = 60;
+    const absoluteMax = 110;
+    t = Math.max(0, Math.min(1, (value - absoluteMin) / (absoluteMax - absoluteMin)));
+  }
+
+  // Klidnější vícebodová barevná škála.
+  // low -> blue -> cyan -> green -> yellow -> orange -> red
+  const stops = [
+    [0.00, [45, 95, 190]],
+    [0.22, [35, 155, 200]],
+    [0.40, [45, 180, 125]],
+    [0.55, [105, 190, 75]],
+    [0.70, [215, 205, 65]],
+    [0.84, [235, 145, 50]],
+    [1.00, [220, 65, 50]]
+  ];
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [p1, c1] = stops[i];
+    const [p2, c2] = stops[i + 1];
+    if (t <= p2) {
+      const f = (t - p1) / Math.max(0.0001, p2 - p1);
+      const c = c1.map((v, k) => Math.round(v + (c2[k] - v) * f));
+      return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+    }
+  }
+
+  return "rgb(220, 65, 50)";
+}
+
+function updateHeatmapScaleLabels(heatmap) {
+  const mode = document.getElementById("heatmapScaleMode")?.value || "absolute";
+  const low = document.getElementById("heatmapScaleLowLabel");
+  const high = document.getElementById("heatmapScaleHighLabel");
+  if (!low || !high) return;
+
+  if (mode === "relative" && heatmap) {
+    low.textContent = `${heatmap.min.toFixed(0)} dB`;
+    high.textContent = `${heatmap.max.toFixed(0)} dB`;
+  } else {
+    low.textContent = "60 dB";
+    high.textContent = "110+ dB";
+  }
 }
 
 let appState = {
@@ -774,7 +823,8 @@ function drawFloorPlan({
   const heatCells = heatmap.cells.map(c => {
     const x = ox + c.ix * cellW;
     const y = oy + c.iy * cellH;
-    const color = heatColor(c.spl, heatmap.min, heatmap.max);
+    const scaleMode = document.getElementById("heatmapScaleMode")?.value || "absolute";
+    const color = heatColor(c.spl, heatmap.min, heatmap.max, scaleMode);
     return `<rect x="${x}" y="${y}" width="${cellW + 0.7}" height="${cellH + 0.7}"
       fill="${color}" fill-opacity="0.44">
       <title>${c.spl.toFixed(1)} dB</title>
@@ -818,6 +868,7 @@ function drawFloorPlan({
   `;
 
   svg.innerHTML = rect + heatCells + title + dims + circles + listener;
+  updateHeatmapScaleLabels(heatmap);
 
   appState.latest = {
     ...appState.latest,
@@ -1512,7 +1563,11 @@ function updateAmplifierUI(result) {
   const detail = document.getElementById("amplifierDetail");
 
     const reservePct = Math.max(0, Math.round((result.headroomFactor - 1) * 100));
-  required.textContent = `Požadovaný výkon včetně ${reservePct}% rezervy: ${result.requiredPower.toFixed(0)} W`;
+  const requiredLabel = document.getElementById("amplifierRequiredPowerLabel");
+  if (requiredLabel) {
+    requiredLabel.textContent = `Požadovaný výkon včetně ${reservePct}% rezervy`;
+  }
+  required.textContent = `${result.requiredPower.toFixed(0)} W`;
 
   if (!result.found) {
     model.textContent = "Nenalezen vhodný model";
@@ -1769,6 +1824,11 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 });
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
+
+document.getElementById("heatmapScaleMode")?.addEventListener("change", () => {
+  if (!appState.latest) return;
+  refreshListenerOnly();
+});
 
 
 ["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride"]

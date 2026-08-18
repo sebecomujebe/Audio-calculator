@@ -712,16 +712,6 @@ input[type="number"]::-webkit-outer-spin-button {
 
 
 /* v0.85 */
-.amp-required-row dt {
-  display: none;
-}
-.amp-required-row dd {
-  grid-column: 1 / -1;
-  text-align: left;
-  font-weight: 700;
-}
-
-
 /* v0.86 – cenové shrnutí */
 .price-summary-panel {
   overflow: hidden;
@@ -787,4 +777,38 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #8f9dab;
   font-size: 11px;
   line-height: 1.45;
+}
+
+
+/* v0.87 – přepínatelná barevná škála heatmapy */
+.heatmap-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #9ba8b7;
+}
+
+.heatmap-mode-control select {
+  min-width: 128px;
+}
+
+.heatbar {
+  background: linear-gradient(
+    90deg,
+    rgb(45,95,190) 0%,
+    rgb(35,155,200) 22%,
+    rgb(45,180,125) 40%,
+    rgb(105,190,75) 55%,
+    rgb(215,205,65) 70%,
+    rgb(235,145,50) 84%,
+    rgb(220,65,50) 100%
+  ) !important;
+}
+
+@media (max-width: 979px) {
+  .heatmap-mode-control {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
