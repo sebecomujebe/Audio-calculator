@@ -1,4 +1,4 @@
-const APP_VERSION = "0.89";
+const APP_VERSION = "0.90";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -37,19 +37,6 @@ const FALLBACK_USE_CASES = {
   background: { label: "Hudba na pozadí", targetSPL: 75, snrAboveAmbient: 6, ampHeadroomFactor: 1.10 },
   utility: { label: "Jednoduché užitkové ozvučení", targetSPL: 70, snrAboveAmbient: 5, ampHeadroomFactor: 1.05 },
 };
-
-
-const COVERAGE_LABELS_CS = {
-  "center-to-center": "Střed ke středu",
-  "min-overlap": "Minimální překrytí",
-  "balanced": "Vyvážené překrytí",
-  "edge-to-edge": "Hrana k hraně",
-  "extended": "Rozšířené rozestupy"
-};
-
-function coverageLabelCs(key, fallback = "") {
-  return COVERAGE_LABELS_CS[key] || fallback || key;
-}
 
 const FALLBACK_COVERAGE_MODES = {
   "center-to-center": { multiplier: 0.5, variation: 1, label: "Střed ke středu" },
@@ -472,14 +459,151 @@ function calculateCoverage({
   };
 }
 
-function calculatePlacements(coverage) {
+
+function getRoomShapeConfig() {
+  const shape = document.getElementById("roomShape")?.value || "rectangle";
+
+  if (shape === "circle") {
+    const diameterM = Math.max(1, numValue(document.getElementById("diameter")?.value, 8));
+    return {
+      shape,
+      widthM: diameterM,
+      lengthM: diameterM,
+      diameterM,
+      areaM2: Math.PI * Math.pow(diameterM / 2, 2)
+    };
+  }
+
+  const widthM = Math.max(1, numValue(document.getElementById("width")?.value, 10));
+  const lengthM = Math.max(1, numValue(document.getElementById("length")?.value, 5));
+
+  if (shape === "lshape") {
+    const cutWidthM = Math.min(Math.max(0.2, numValue(document.getElementById("lCutWidth")?.value, 3)), Math.max(0.2, widthM - 0.2));
+    const cutLengthM = Math.min(Math.max(0.2, numValue(document.getElementById("lCutLength")?.value, 3)), Math.max(0.2, lengthM - 0.2));
+    return {
+      shape,
+      widthM,
+      lengthM,
+      cutWidthM,
+      cutLengthM,
+      cutCorner: document.getElementById("lCutCorner")?.value || "top-right",
+      areaM2: widthM * lengthM - cutWidthM * cutLengthM
+    };
+  }
+
+  return { shape: "rectangle", widthM, lengthM, areaM2: widthM * lengthM };
+}
+
+function isPointInsideRoomMeters(xM, yM, room) {
+  const eps = 1e-7;
+
+  if (room.shape === "circle") {
+    const r = room.diameterM / 2;
+    const dx = xM - r;
+    const dy = yM - r;
+    return dx * dx + dy * dy <= r * r + eps;
+  }
+
+  if (xM < -eps || yM < -eps || xM > room.widthM + eps || yM > room.lengthM + eps) return false;
+  if (room.shape !== "lshape") return true;
+
+  const cw = room.cutWidthM;
+  const cl = room.cutLengthM;
+
+  if (room.cutCorner === "top-left") return !(xM <= cw + eps && yM <= cl + eps);
+  if (room.cutCorner === "top-right") return !(xM >= room.widthM - cw - eps && yM <= cl + eps);
+  if (room.cutCorner === "bottom-left") return !(xM <= cw + eps && yM >= room.lengthM - cl - eps);
+  return !(xM >= room.widthM - cw - eps && yM >= room.lengthM - cl - eps);
+}
+
+function clampPointToRoomMeters(xM, yM, room) {
+  xM = Math.max(0, Math.min(room.widthM, xM));
+  yM = Math.max(0, Math.min(room.lengthM, yM));
+  if (isPointInsideRoomMeters(xM, yM, room)) return {xM, yM};
+
+  if (room.shape === "circle") {
+    const r = room.diameterM / 2;
+    const dx = xM - r;
+    const dy = yM - r;
+    const d = Math.hypot(dx, dy) || 1;
+    const rr = Math.max(0, r - 0.01);
+    return {xM: r + dx / d * rr, yM: r + dy / d * rr};
+  }
+
+  const candidates = [];
+  const cw = room.cutWidthM;
+  const cl = room.cutLengthM;
+
+  if (room.cutCorner === "top-right") {
+    candidates.push({xM: room.widthM - cw - 0.01, yM}, {xM, yM: cl + 0.01});
+  } else if (room.cutCorner === "top-left") {
+    candidates.push({xM: cw + 0.01, yM}, {xM, yM: cl + 0.01});
+  } else if (room.cutCorner === "bottom-right") {
+    candidates.push({xM: room.widthM - cw - 0.01, yM}, {xM, yM: room.lengthM - cl - 0.01});
+  } else {
+    candidates.push({xM: cw + 0.01, yM}, {xM, yM: room.lengthM - cl - 0.01});
+  }
+
+  const valid = candidates.filter(p => isPointInsideRoomMeters(p.xM, p.yM, room));
+  valid.sort((a,b) => Math.hypot(a.xM-xM,a.yM-yM)-Math.hypot(b.xM-xM,b.yM-yM));
+  return valid[0] || {xM, yM};
+}
+
+function roomPolygonPoints(room, ox, oy, scale) {
+  const w = room.widthM * scale;
+  const h = room.lengthM * scale;
+  const cw = room.cutWidthM * scale;
+  const cl = room.cutLengthM * scale;
+
+  if (room.cutCorner === "top-left")
+    return [[ox+cw,oy],[ox+w,oy],[ox+w,oy+h],[ox,oy+h],[ox,oy+cl],[ox+cw,oy+cl]];
+  if (room.cutCorner === "top-right")
+    return [[ox,oy],[ox+w-cw,oy],[ox+w-cw,oy+cl],[ox+w,oy+cl],[ox+w,oy+h],[ox,oy+h]];
+  if (room.cutCorner === "bottom-left")
+    return [[ox,oy],[ox+w,oy],[ox+w,oy+h],[ox+cw,oy+h],[ox+cw,oy+h-cl],[ox,oy+h-cl]];
+  return [[ox,oy],[ox+w,oy],[ox+w,oy+h-cl],[ox+w-cw,oy+h-cl],[ox+w-cw,oy+h],[ox,oy+h]];
+}
+
+function roomSvgShape(room, ox, oy, scale) {
+  if (room.shape === "circle") {
+    const r = room.diameterM / 2 * scale;
+    return `<circle cx="${ox+r}" cy="${oy+r}" r="${r}" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+  }
+  if (room.shape === "lshape") {
+    const pts = roomPolygonPoints(room, ox, oy, scale).map(p => p.join(",")).join(" ");
+    return `<polygon points="${pts}" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+  }
+  return `<rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+}
+
+function roomClipPath(room, ox, oy, scale, clipId) {
+  if (room.shape === "circle") {
+    const r = room.diameterM / 2 * scale;
+    return `<clipPath id="${clipId}"><circle cx="${ox+r}" cy="${oy+r}" r="${r}"/></clipPath>`;
+  }
+  if (room.shape === "lshape") {
+    const pts = roomPolygonPoints(room, ox, oy, scale).map(p => p.join(",")).join(" ");
+    return `<clipPath id="${clipId}"><polygon points="${pts}"/></clipPath>`;
+  }
+  return `<clipPath id="${clipId}"><rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4"/></clipPath>`;
+}
+
+function updateRoomShapeUi() {
+  const shape = document.getElementById("roomShape")?.value || "rectangle";
+  document.getElementById("lengthRow")?.classList.toggle("hidden", shape === "circle");
+  document.getElementById("widthRow")?.classList.toggle("hidden", shape === "circle");
+  document.getElementById("lShapeControls")?.classList.toggle("hidden", shape !== "lshape");
+  document.getElementById("circleControls")?.classList.toggle("hidden", shape !== "circle");
+}
+
+function calculatePlacements(coverage, room = null) {
   const points = [];
   for (let row = 0; row < coverage.rows; row++) {
     for (let col = 0; col < coverage.columns; col++) {
-      points.push({
-        x: coverage.offsetX + col * coverage.spacingX,
-        y: coverage.offsetY + row * coverage.spacingY
-      });
+      const point = {x: coverage.offsetX + col * coverage.spacingX, y: coverage.offsetY + row * coverage.spacingY};
+      if (!room || isPointInsideRoomMeters(point.x / FEET_PER_METER, point.y / FEET_PER_METER, room)) {
+        points.push(point);
+      }
     }
   }
   return points;
@@ -600,11 +724,12 @@ function calculateHeatmap({
   mountingHeightFt,
   listenerHeightFt,
   speaker,
-  tap
+  tap,
+  room
 }) {
   const lengthM = lengthFt / FEET_PER_METER;
   const widthM = widthFt / FEET_PER_METER;
-  const areaM2 = lengthM * widthM;
+  const areaM2 = room?.areaM2 || (lengthM * widthM);
 
   // Progresivní rozlišení podle velikosti prostoru.
   let stepM;
@@ -638,6 +763,10 @@ function calculateHeatmap({
       const xFt = widthFt * (ix + 0.5) / nx;
       const yFt = lengthFt * (iy + 0.5) / ny;
 
+      if (room && !isPointInsideRoomMeters(xFt / FEET_PER_METER, yFt / FEET_PER_METER, room)) {
+        continue;
+      }
+
       const spl = calculateSPLAtPoint({
         xFt,
         yFt,
@@ -655,7 +784,8 @@ function calculateHeatmap({
     }
   }
 
-  const average = 10 * Math.log10(sumLinear / cells.length);
+  const average = cells.length ? 10 * Math.log10(sumLinear / cells.length) : 0;
+  if (!cells.length) { min = 0; max = 0; }
 
   return {
     nx,
@@ -779,21 +909,9 @@ let appState = {
   latest: null
 };
 
-function calculatePlacements(coverage) {
-  const points = [];
-  for (let row = 0; row < coverage.rows; row++) {
-    for (let col = 0; col < coverage.columns; col++) {
-      points.push({
-        x: coverage.offsetX + col * coverage.spacingX,
-        y: coverage.offsetY + row * coverage.spacingY
-      });
-    }
-  }
-  return points;
-}
 
 function drawFloorPlan({
-  lengthM, widthM, lengthFt, widthFt,
+  lengthM, widthM, lengthFt, widthFt, room,
   placements, coverage, speakerModel, heatmap,
   listenerXFt, listenerYFt, listenerSPL
 }) {
@@ -809,8 +927,9 @@ function drawFloorPlan({
   const oy = (H - roomH) / 2;
   const ftToM = 1 / FEET_PER_METER;
 
-  const rect = `<rect x="${ox}" y="${oy}" width="${roomW}" height="${roomH}" rx="4"
-    fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+  const rect = roomSvgShape(room, ox, oy, scale);
+  const floorClipId = "floor-room-clip";
+  const floorDefs = `<defs>${roomClipPath(room, ox, oy, scale, floorClipId)}</defs>`;
 
   const title = `<text x="${W/2}" y="${oy - 22}" text-anchor="middle"
     fill="#dfe6ee" font-size="16" font-weight="700">${speakerModel}</text>`;
@@ -871,7 +990,7 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
     </g>
   `;
 
-  svg.innerHTML = rect + heatCells + title + dims + circles + listener;
+  svg.innerHTML = floorDefs + rect + `<g clip-path="url(#${floorClipId})">${heatCells}</g>` + title + dims + circles + listener;
   updateHeatmapScaleLabels(heatmap);
 
   appState.latest = {
@@ -1143,6 +1262,12 @@ function refreshListenerOnly() {
   if (!appState.latest) return;
   const s = appState.latest;
 
+  if (s.room) {
+    const p = clampPointToRoomMeters(appState.listenerXFt / FEET_PER_METER, appState.listenerYFt / FEET_PER_METER, s.room);
+    appState.listenerXFt = p.xM * FEET_PER_METER;
+    appState.listenerYFt = p.yM * FEET_PER_METER;
+  }
+
   const listenerSPL = calculateSPLAtPoint({
     xFt: appState.listenerXFt,
     yFt: appState.listenerYFt,
@@ -1162,6 +1287,7 @@ function refreshListenerOnly() {
     widthM: s.widthM,
     lengthFt: s.lengthFt,
     widthFt: s.widthFt,
+    room: s.room,
     placements: s.placements,
     coverage: s.coverage,
     speakerModel: s.speaker.model,
@@ -1192,13 +1318,20 @@ function populateUseCaseOptions() {
 
 function populateCoverageOptions() {
   const select = document.getElementById("coverageDensity");
+  const czechCoverageLabels = {
+    "center-to-center": "Střed ke středu",
+    "min-overlap": "Minimální překrytí",
+    "balanced": "Vyvážené překrytí",
+    "edge-to-edge": "Hrana k hraně",
+    "extended": "Rozšířené rozestupy"
+  };
   if (!select) return;
   const current = select.value || "edge-to-edge";
   select.innerHTML = "";
   for (const [key, mode] of Object.entries(COVERAGE_MODES).sort((a,b) => a[1].variation - b[1].variation)) {
     const option = document.createElement("option");
     option.value = key;
-    option.textContent = `${coverageLabelCs(key, mode.label)} (cca ±${mode.variation} dB)`;
+    option.textContent = `${czechCoverageLabels[key] || mode.label} (cca ±${mode.variation} dB)`;
     select.appendChild(option);
   }
   if ([...select.options].some(o => o.value === current)) select.value = current;
@@ -1348,70 +1481,16 @@ function updateSuitabilityUI(result) {
 
 
 const PRICE_ENDPOINT = "/api/prices";
-const PRICE_LOCAL_STORAGE_KEY = "audio-calculator:last-good-prices:v1";
-const PRICE_LOCAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const PRICE_DATA = new Map();
 let PRICE_DATA_UPDATED_AT = null;
 let PRICE_DATA_LOAD_STATE = "idle";
-
-
-function savePriceDataLocally(payload) {
-  try {
-    localStorage.setItem(PRICE_LOCAL_STORAGE_KEY, JSON.stringify({
-      savedAt: new Date().toISOString(),
-      payload
-    }));
-  } catch (_) {
-    // localStorage is only a convenience fallback.
-  }
-}
-
-function loadPriceDataLocally() {
-  try {
-    const raw = localStorage.getItem(PRICE_LOCAL_STORAGE_KEY);
-    if (!raw) return null;
-    const cached = JSON.parse(raw);
-    const savedAt = Date.parse(cached?.savedAt || "");
-    if (!Number.isFinite(savedAt)) return null;
-    if (Date.now() - savedAt > PRICE_LOCAL_MAX_AGE_MS) return null;
-    return cached.payload || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function applyPricePayload(payload) {
-  const items = payload?.items || payload?.prices || payload;
-  if (!items || typeof items !== "object") {
-    throw new Error("Neplatný formát cenových dat");
-  }
-
-  PRICE_DATA.clear();
-
-  for (const [code, raw] of Object.entries(items)) {
-    if (!code) continue;
-
-    const item = typeof raw === "number" ? { priceVat: raw } : raw;
-    const priceVat = Number(item?.priceVat ?? item?.PRICE_VAT ?? item?.price_vat);
-
-    if (Number.isFinite(priceVat)) {
-      PRICE_DATA.set(code, {
-        ...item,
-        priceVat
-      });
-    }
-  }
-
-  PRICE_DATA_UPDATED_AT = payload?.updatedAt || payload?.updated_at || null;
-  return PRICE_DATA.size;
-}
 
 async function loadPriceData() {
   PRICE_DATA_LOAD_STATE = "loading";
   const statusEl = document.getElementById("priceDataStatus");
 
   try {
-    const response = await fetch(PRICE_ENDPOINT, {
+    const response = await fetch(`${PRICE_ENDPOINT}?_=${Date.now()}`, {
       cache: "no-store"
     });
 
@@ -1420,42 +1499,42 @@ async function loadPriceData() {
     }
 
     const payload = await response.json();
-    const count = applyPricePayload(payload);
+    const items = payload?.items || payload?.prices || payload;
 
-    if (!count) {
-      throw new Error("Cenový feed je prázdný");
+    if (!items || typeof items !== "object") {
+      throw new Error("Neplatný formát cenových dat");
     }
 
-    savePriceDataLocally(payload);
-    PRICE_DATA_LOAD_STATE = "ready";
+    PRICE_DATA.clear();
 
-    if (statusEl) {
-      const source = response.headers.get("X-Price-Cache");
-      statusEl.textContent = source === "stale"
-        ? "Ceny načteny – poslední známé"
-        : "Ceny načteny";
-    }
+    for (const [code, raw] of Object.entries(items)) {
+      if (!code) continue;
 
-    return true;
-  } catch (error) {
-    const localPayload = loadPriceDataLocally();
+      const item = typeof raw === "number"
+        ? { priceVat: raw }
+        : raw;
 
-    if (localPayload) {
-      try {
-        const count = applyPricePayload(localPayload);
-        if (count) {
-          PRICE_DATA_LOAD_STATE = "local-fallback";
-          if (statusEl) {
-            statusEl.textContent = "Ceny – poslední uložené";
-            statusEl.title = "Serverový cenový feed není dostupný; používá se poslední úspěšně uložený ceník.";
-          }
-          return true;
-        }
-      } catch (_) {
-        // Continue to unavailable state.
+      const priceVat = Number(item?.priceVat ?? item?.PRICE_VAT ?? item?.price_vat);
+
+      if (Number.isFinite(priceVat)) {
+        PRICE_DATA.set(code, {
+          ...item,
+          priceVat
+        });
       }
     }
 
+    PRICE_DATA_UPDATED_AT = payload?.updatedAt || payload?.updated_at || null;
+    PRICE_DATA_LOAD_STATE = PRICE_DATA.size > 0 ? "ready" : "empty";
+
+    if (statusEl) {
+      statusEl.textContent = PRICE_DATA.size > 0
+        ? "Ceny načteny"
+        : "Cenový feed je prázdný";
+    }
+
+    return PRICE_DATA.size > 0;
+  } catch (error) {
     PRICE_DATA_LOAD_STATE = "unavailable";
     if (statusEl) {
       statusEl.textContent = "Cenový feed zatím není připojen";
@@ -1712,8 +1791,9 @@ function updateAmplifierUI(result) {
 }
 
 function calculate() {
-  const lengthM = Number(document.getElementById("length").value);
-  const widthM = Number(document.getElementById("width").value);
+  const room = getRoomShapeConfig();
+  const lengthM = room.lengthM;
+  const widthM = room.widthM;
   const heightM = Number(document.getElementById("height").value);
   const ambientPreset = document.getElementById("ambientNoisePreset").value;
   const ambientNoise = ambientPreset === "custom"
@@ -1796,7 +1876,13 @@ function calculate() {
     return;
   }
 
-  const placements = calculatePlacements(coverage);
+  const placements = calculatePlacements(coverage, room);
+  const effectiveCoverage = {...coverage, count: placements.length};
+
+  if (!placements.length) {
+    alert("Pro zadaný tvar místnosti se nepodařilo umístit žádný reproduktor.");
+    return;
+  }
 
   const power = calculatePower({
     speaker,
@@ -1804,7 +1890,7 @@ function calculate() {
     ambientNoise,
     useCase,
     voltage
-  }, coverage);
+  }, effectiveCoverage);
 
   const availableTaps = getAvailableTapsForSpeaker(speaker, voltage);
   const manualTap = tapOverride !== "auto" ? numValue(tapOverride, NaN) : NaN;
@@ -1818,7 +1904,7 @@ function calculate() {
     ...power,
     recommendedTapAuto: power.recommendedTap,
     recommendedTap: selectedTap,
-    totalPower: coverage.count * selectedTap,
+    totalPower: effectiveCoverage.count * selectedTap,
     singleSpeakerSPL:
       power.singleSpeakerSPL +
       10 * Math.log10(Math.max(selectedTap, 0.001) / Math.max(power.recommendedTap, 0.001))
@@ -1840,18 +1926,20 @@ function calculate() {
     mountingHeightFt,
     listenerHeightFt,
     speaker,
-    tap: selectedTap
+    tap: selectedTap,
+    room
   });
 
   const visualHeatmap = prepareRenderedHeatmap(heatmap);
   const splStats = heatmap;
 
-  if (appState.listenerXFt === null || appState.listenerXFt > widthFt) {
+  if (appState.listenerXFt === null || appState.listenerYFt === null) {
     appState.listenerXFt = widthFt / 2;
-  }
-  if (appState.listenerYFt === null || appState.listenerYFt > lengthFt) {
     appState.listenerYFt = lengthFt / 2;
   }
+  const lp = clampPointToRoomMeters(appState.listenerXFt / FEET_PER_METER, appState.listenerYFt / FEET_PER_METER, room);
+  appState.listenerXFt = lp.xM * FEET_PER_METER;
+  appState.listenerYFt = lp.yM * FEET_PER_METER;
 
   const listenerSPL = calculateSPLAtPoint({
     xFt: appState.listenerXFt,
@@ -1870,13 +1958,13 @@ function calculate() {
     targetSPL,
     heatmap,
     power: adjustedPower,
-    coverage,
+    coverage: effectiveCoverage,
     recommendedCoverage
   });
 
   document.getElementById("resultTitle").textContent = speaker.model;
   updateSuitabilityUI(suitability);
-  document.getElementById("speakerCount").textContent = `${coverage.count} ks`;
+  document.getElementById("speakerCount").textContent = `${effectiveCoverage.count} ks`;
   document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
@@ -1886,6 +1974,7 @@ function calculate() {
   document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
+  document.getElementById("roomAreaValue").textContent = `${room.areaM2.toFixed(1)} m²`;
   const uc = USE_CASES[useCase];
   const ambientBased = ambientNoise + uc.snrAboveAmbient;
   const targetSource = targetSPL > uc.targetSPL
@@ -1893,8 +1982,15 @@ function calculate() {
     : uc.label;
   document.getElementById("targetSplLabel").textContent = `Cílové SPL (${targetSource})`;
   document.getElementById("targetSplValue").textContent = `${targetSPL.toFixed(0)} dB`;
+  const coverageNames = {
+    "center-to-center": "Střed ke středu",
+    "min-overlap": "Minimální překrytí",
+    "balanced": "Vyvážené překrytí",
+    "edge-to-edge": "Hrana k hraně",
+    "extended": "Rozšířené rozestupy"
+  };
   document.getElementById("coverageModeValue").textContent =
-    `${coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
+    `${coverageNames[coverageDensity] || coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -1903,13 +1999,13 @@ function calculate() {
   document.getElementById("selectedTapValue").textContent = `${selectedTap.toString().replace(".", ",")} W`;
   document.getElementById("zonePowerValue").textContent = `${adjustedPower.totalPower.toFixed(0)} W`;
   updateAmplifierUI(amplifierRecommendation);
-  updatePriceSummary({ speaker, speakerCount: coverage.count, amplifierRecommendation });
+  updatePriceSummary({ speaker, speakerCount: effectiveCoverage.count, amplifierRecommendation });
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
 
   appState.latest = {
     lengthM, widthM, heightM, lengthFt, widthFt,
-    placements, coverage, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
+    placements, coverage: effectiveCoverage, room, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
     listenerHeightFt, mountingHeightFt
   };
@@ -1919,8 +2015,9 @@ function calculate() {
     widthM,
     lengthFt,
     widthFt,
+    room,
     placements,
-    coverage,
+    coverage: effectiveCoverage,
     speakerModel: speaker.model,
     heatmap: visualHeatmap,
     listenerXFt: appState.listenerXFt,
@@ -1947,12 +2044,19 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
 
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
+document.getElementById("roomShape")?.addEventListener("change", () => {
+  updateRoomShapeUi();
+  appState.listenerXFt = null;
+  appState.listenerYFt = null;
+  calculate();
+});
 
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride"]
+
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","diameter"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
-      if (["length","width"].includes(id)) {
+      if (["length","width","lCutWidth","lCutLength","lCutCorner","diameter"].includes(id)) {
         appState.listenerXFt = null;
         appState.listenerYFt = null;
       }
@@ -1975,8 +2079,10 @@ function pointerToListenerPosition(evt) {
   const xM = (clampedX - g.ox) / g.scale;
   const yM = (clampedY - g.oy) / g.scale;
 
-  appState.listenerXFt = xM * FEET_PER_METER;
-  appState.listenerYFt = yM * FEET_PER_METER;
+  const room = appState.latest?.room;
+  const p = room ? clampPointToRoomMeters(xM, yM, room) : {xM, yM};
+  appState.listenerXFt = p.xM * FEET_PER_METER;
+  appState.listenerYFt = p.yM * FEET_PER_METER;
   refreshListenerOnly();
 }
 
@@ -2028,6 +2134,7 @@ svg.addEventListener("pointercancel", () => {
 });
 
 async function initializeApp() {
+  updateRoomShapeUi();
   setDataSourceStatus("fallback", "Načítám živá data…");
   try {
     await loadLiveData();

@@ -794,3 +794,12 @@ input[type="number"]::-webkit-outer-spin-button {
     rgb(220,65,50) 100%
   ) !important;
 }
+
+
+/* v0.90 – tvary místnosti */
+.room-shape-row { margin-bottom: 6px; }
+.shape-extra.hidden,
+#lengthRow.hidden,
+#widthRow.hidden { display: none !important; }
+.shape-extra { margin: 4px 0; }
+#roomShape { width: 100%; }

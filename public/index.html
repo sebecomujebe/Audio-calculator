@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.89" />
+  <link rel="stylesheet" href="style.css?v=0.90" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.89</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AV INTEGRA • AUDIO CALCULATOR</div><div class="version-badge">v0.90</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -20,8 +20,17 @@
       <aside class="panel form-panel compact-form-panel">
         <h2>1. Parametry prostoru</h2>
 
+        <label class="room-shape-row">
+          <span>Tvar místnosti</span>
+          <select id="roomShape">
+            <option value="rectangle" selected>Obdélník</option>
+            <option value="lshape">Místnost ve tvaru L</option>
+            <option value="circle">Kruhová místnost</option>
+          </select>
+        </label>
+
         <div class="grid-2">
-          <label>
+          <label id="lengthRow">
             <span>Délka místnosti</span>
             <div class="field-with-unit">
               <input id="length" type="number" max="9999" min="1" step="0.1" value="5" />
@@ -29,7 +38,7 @@
             </div>
           </label>
 
-          <label>
+          <label id="widthRow">
             <span>Šířka místnosti</span>
             <div class="field-with-unit">
               <input id="width" type="number" max="9999" min="1" step="0.1" value="10" />
@@ -66,7 +75,45 @@
           </label>
         </div>
 
-        <label>
+                <div id="lShapeControls" class="shape-extra hidden">
+          <div class="compact-grid-2">
+            <label>
+              <span>Šířka výřezu</span>
+              <div class="field-with-unit">
+                <input id="lCutWidth" type="number" min="0.2" step="0.1" value="3" />
+                <span>m</span>
+              </div>
+            </label>
+            <label>
+              <span>Délka výřezu</span>
+              <div class="field-with-unit">
+                <input id="lCutLength" type="number" min="0.2" step="0.1" value="3" />
+                <span>m</span>
+              </div>
+            </label>
+          </div>
+          <label>
+            <span>Umístění výřezu</span>
+            <select id="lCutCorner">
+              <option value="top-right" selected>Pravý horní roh</option>
+              <option value="top-left">Levý horní roh</option>
+              <option value="bottom-right">Pravý dolní roh</option>
+              <option value="bottom-left">Levý dolní roh</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="circleControls" class="shape-extra hidden">
+          <label>
+            <span>Průměr místnosti</span>
+            <div class="field-with-unit">
+              <input id="diameter" type="number" min="1" max="9999" step="0.1" value="8" />
+              <span>m</span>
+            </div>
+          </label>
+        </div>
+
+<label>
           <span>Použití</span>
           <select id="useCase">
             <option value="background">Hudba na pozadí</option>
@@ -281,6 +328,7 @@
 
           <dl class="summary-list">
             <div><dt>Doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
+            <div><dt>Plocha místnosti</dt><dd id="roomAreaValue">—</dd></div>
             <div class="summary-explained">
               <dt id="targetSplLabel">Cílové SPL</dt>
               <dd id="targetSplValue">75 dB</dd>
@@ -358,6 +406,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.89"></script>
+  <script src="app.js?v=0.90"></script>
 </body>
 </html>
