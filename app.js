@@ -1,4 +1,4 @@
-const APP_VERSION = "0.6";
+const APP_VERSION = "0.71";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -346,8 +346,133 @@ function calculateHeatmap({
   speaker,
   tap
 }) {
+  // Adaptivní přesná síť:
+  // cílíme na cca 0,5 m mezi vzorky; u extrémně velkých prostor
+  // dovolíme až 0,75 m, aby výpočet zůstal rychlý.
+  const targetStepM = 0.5;
+  const maxStepM = 0.75;
+  const lengthM = lengthFt / FEET_PER_METER;
+  const widthM = widthFt / FEET_PER_METER;
+
+  let stepM = targetStepM;
+  let nx = Math.max(12, Math.ceil(widthM / stepM));
+  let ny = Math.max(12, Math.ceil(lengthM / stepM));
+
+  // Ochrana výkonu pro opravdu velké haly: max ~40 000 bodů.
+  const maxPoints = 40000;
+  if (nx * ny > maxPoints) {
+    const areaM2 = widthM * lengthM;
+    stepM = Math.sqrt(areaM2 / maxPoints);
+    stepM = Math.min(maxStepM, Math.max(targetStepM, stepM));
+    nx = Math.max(12, Math.ceil(widthM / stepM));
+    ny = Math.max(12, Math.ceil(lengthM / stepM));
+
+    // Když by i při 0,75 m bylo bodů příliš, omezíme počet poměrově.
+    if (nx * ny > maxPoints) {
+      const scale = Math.sqrt(maxPoints / (nx * ny));
+      nx = Math.max(12, Math.floor(nx * scale));
+      ny = Math.max(12, Math.floor(ny * scale));
+    }
+  }
+
+  const actualStepXM = widthM / nx;
+  const actualStepYM = lengthM / ny;
+
+  const cells = [];
+  let min = Infinity;
+  let max = -Infinity;
+  let sumLinear = 0;
+
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const xFt = widthFt * (ix + 0.5) / nx;
+      const yFt = lengthFt * (iy + 0.5) / ny;
+      const spl = calculateSPLAtPoint({
+        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
+      });
+
+      cells.push({ix, iy, spl});
+      min = Math.min(min, spl);
+      max = Math.max(max, spl);
+
+      // Pro fyzikálně správný průměr hladin pracujeme v lineární energii.
+      sumLinear += Math.pow(10, spl / 10);
+    }
+  }
+
+  const average = 10 * Math.log10(sumLinear / cells.length);
+
+  return {
+    nx, ny, cells,
+    min,
+    max,
+    average,
+    spread: max - min,
+    stepXM: actualStepXM,
+    stepYM: actualStepYM,
+    points: cells.length
+  };
+}) {
   const nx = 30;
   const ny = 30;
+  const cells = [];
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const xFt = widthFt * (ix + 0.5) / nx;
+      const yFt = lengthFt * (iy + 0.5) / ny;
+      const spl = calculateSPLAtPoint({
+        xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap
+      });
+      cells.push({ix, iy, spl});
+      min = Math.min(min, spl);
+      max = Math.max(max, spl);
+      sum += spl;
+    }
+  }
+
+  return {
+    nx, ny, cells,
+    min,
+    max,
+    average: sum / cells.length,
+    spread: max - min
+  };
+}
+
+
+function calculateVisualHeatmap({
+  lengthFt,
+  widthFt,
+  placements,
+  mountingHeightFt,
+  listenerHeightFt,
+  speaker,
+  tap
+}) {
+  // Ve v0.71 používáme pro grafiku i statistiky stejnou adaptivní mřížku.
+  return calculateHeatmap({
+    lengthFt,
+    widthFt,
+    placements,
+    mountingHeightFt,
+    listenerHeightFt,
+    speaker,
+    tap
+  });
+}) {
+  // Grafická mřížka má stejnou fyzickou velikost buněk v obou osách,
+  // takže u dlouhých místností nevznikají velmi široké obdélníky.
+  const longestSide = Math.max(lengthFt, widthFt);
+  const targetLongAxisCells = 48;
+  const cellSizeFt = longestSide / targetLongAxisCells;
+
+  const nx = Math.max(12, Math.min(60, Math.round(widthFt / cellSizeFt)));
+  const ny = Math.max(12, Math.min(60, Math.round(lengthFt / cellSizeFt)));
+
   const cells = [];
   let min = Infinity;
   let max = -Infinity;
@@ -520,7 +645,7 @@ function refreshListenerOnly() {
     placements: s.placements,
     coverage: s.coverage,
     speakerModel: s.speaker.model,
-    heatmap: s.heatmap,
+    heatmap: s.visualHeatmap || s.heatmap,
     listenerXFt: appState.listenerXFt,
     listenerYFt: appState.listenerYFt,
     listenerSPL
@@ -639,7 +764,10 @@ function calculate() {
   const lengthM = Number(document.getElementById("length").value);
   const widthM = Number(document.getElementById("width").value);
   const heightM = Number(document.getElementById("height").value);
-  const ambientNoise = Number(document.getElementById("ambientNoise").value);
+  const ambientPreset = document.getElementById("ambientNoisePreset").value;
+  const ambientNoise = ambientPreset === "custom"
+    ? Number(document.getElementById("ambientNoiseCustom").value)
+    : Number(ambientPreset);
   const useCase = document.getElementById("useCase").value;
   const listenerPosition = document.getElementById("listenerPosition").value;
   const coverageDensity = document.getElementById("coverageDensity").value;
@@ -724,6 +852,7 @@ function calculate() {
     voltage
   }, coverage);
 
+  // Adaptivní přesná síť pro heatmapu i všechny statistiky.
   const heatmap = calculateHeatmap({
     lengthFt,
     widthFt,
@@ -734,15 +863,8 @@ function calculate() {
     tap: power.recommendedTap
   });
 
-  const splStats = calculateSPLStatsLikeSSC({
-    lengthFt,
-    widthFt,
-    placements,
-    mountingHeightFt,
-    listenerHeightFt,
-    speaker,
-    tap: power.recommendedTap
-  });
+  const visualHeatmap = heatmap;
+  const splStats = heatmap;
 
   if (appState.listenerXFt === null || appState.listenerXFt > widthFt) {
     appState.listenerXFt = widthFt / 2;
@@ -766,7 +888,7 @@ function calculate() {
     recommendedSpeaker,
     speakerType,
     targetSPL,
-    heatmap: splStats,
+    heatmap,
     power,
     coverage,
     recommendedCoverage
@@ -778,10 +900,12 @@ function calculate() {
   document.getElementById("layoutValue").textContent = `${coverage.columns} × ${coverage.rows}`;
   document.getElementById("tapValue").textContent = `${power.recommendedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
-  document.getElementById("averageSplValue").textContent = `${splStats.average.toFixed(1)} dB`;
-  document.getElementById("minimumSplValue").textContent = `${splStats.min.toFixed(1)} dB`;
-  document.getElementById("maximumSplValue").textContent = `${splStats.max.toFixed(1)} dB`;
-  document.getElementById("spreadSplValue").textContent = `${splStats.spread.toFixed(1)} dB`;
+  document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
+  document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
+  document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
+  document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
+  document.getElementById("samplingResolutionValue").textContent =
+    `${heatmap.stepXM.toFixed(2)} × ${heatmap.stepYM.toFixed(2)} m (${heatmap.points.toLocaleString("cs-CZ")} bodů)`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   const uc = USE_CASES[useCase];
@@ -803,7 +927,7 @@ function calculate() {
 
   appState.latest = {
     lengthM, widthM, lengthFt, widthFt,
-    placements, coverage, speaker, power, heatmap, splStats,
+    placements, coverage, speaker, power, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage,
     listenerHeightFt, mountingHeightFt
   };
@@ -816,7 +940,7 @@ function calculate() {
     placements,
     coverage,
     speakerModel: speaker.model,
-    heatmap,
+    heatmap: visualHeatmap,
     listenerXFt: appState.listenerXFt,
     listenerYFt: appState.listenerYFt,
     listenerSPL
@@ -831,9 +955,16 @@ document.getElementById("speakerType").addEventListener("change", (e) => {
   document.getElementById("pendantHeightRow").classList.toggle("hidden", e.target.value !== "pendant");
 });
 
+
+document.getElementById("ambientNoisePreset").addEventListener("change", (e) => {
+  const custom = e.target.value === "custom";
+  document.getElementById("ambientCustomRow").classList.toggle("hidden", !custom);
+  calculate();
+});
+
 document.getElementById("calculateBtn").addEventListener("click", calculate);
 
-["length","width","height","ambientNoise","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (["length","width"].includes(id)) {

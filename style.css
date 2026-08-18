@@ -480,3 +480,17 @@ input[type="number"]::-webkit-outer-spin-button {
     width: 150px;
   }
 }
+
+.ambient-custom {
+  width: 150px;
+  margin-top: 10px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+}
