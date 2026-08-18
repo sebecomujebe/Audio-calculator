@@ -1,4 +1,4 @@
-# Audio Calculator v0.89
+# Audio Calculator v0.95
 
 Cloudflare Worker + Static Assets.
 
@@ -11,6 +11,3 @@ Price behavior:
 - keeps the last successful server-side snapshot in Cloudflare Cache for up to 180 days,
 - if AV Integra feed is unavailable during refresh, serves the last successful snapshot,
 - browser also stores the last successful price payload locally as an additional fallback.
-
-Feed:
-`https://www.avintegra.cz/ShopItemFeed.asp?File=HeCZ0404asZ.xml`
