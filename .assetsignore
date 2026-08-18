@@ -1,4 +1,11 @@
+**/node_modules
+**/.git
+**/.DS_Store
+
 index.js
 package.json
+package-lock.json
+bun.lock
+bun.lockb
 wrangler.jsonc
 README.md
