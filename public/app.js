@@ -1,4 +1,4 @@
-const APP_VERSION = "0.95";
+const APP_VERSION = "0.96";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -847,26 +847,32 @@ function generateCircularRingPlacements(count, room, clearanceM) {
     return [{x: cx * FEET_PER_METER, y: cy * FEET_PER_METER}];
   }
 
+  // Small circular layouts must remain exactly symmetric around the room centre.
+  // 2–6 speakers form a regular polygon (4 speakers = a centred cross).
+  if (count >= 2 && count <= 6) {
+    const radius = usableR * 0.72;
+    const phase = count === 4 ? 0 : -Math.PI / 2;
+    return Array.from({length: count}, (_, i) => {
+      const angle = phase + 2 * Math.PI * i / count;
+      return {
+        x: (cx + radius * Math.cos(angle)) * FEET_PER_METER,
+        y: (cy + radius * Math.sin(angle)) * FEET_PER_METER
+      };
+    });
+  }
+
   const points = [];
   let remaining = count;
 
-  // For 7+ speakers a centre point gives a visually clean and useful layout.
-  if (count >= 7 || count === 3 || count === 5) {
+  // Centre + rings for larger layouts.
+  if (count >= 7) {
     points.push({x: cx * FEET_PER_METER, y: cy * FEET_PER_METER});
     remaining--;
   }
 
-  if (remaining <= 0) return points;
-
-  // Number of concentric rings grows slowly with count.
   const ringCount = Math.max(1, Math.ceil(Math.sqrt(remaining / 6)));
   const capacities = [];
-  let capacityTotal = 0;
-  for (let ring = 1; ring <= ringCount; ring++) {
-    const cap = 6 * ring;
-    capacities.push(cap);
-    capacityTotal += cap;
-  }
+  for (let ring = 1; ring <= ringCount; ring++) capacities.push(6 * ring);
 
   let left = remaining;
   for (let ring = 1; ring <= ringCount && left > 0; ring++) {
@@ -875,7 +881,7 @@ function generateCircularRingPlacements(count, room, clearanceM) {
     let onRing = Math.min(capacity, Math.max(1, left - Math.max(0, laterCapacity - left)));
     if (ring === ringCount) onRing = left;
 
-    const radius = usableR * ring / ringCount * 0.88;
+    const radius = usableR * ring / ringCount * 0.82;
     const phase = ring % 2 === 0 ? Math.PI / Math.max(1, onRing) : 0;
 
     for (let i = 0; i < onRing; i++) {
@@ -889,6 +895,37 @@ function generateCircularRingPlacements(count, room, clearanceM) {
   }
 
   return points.slice(0, count);
+}
+
+function scaleCircularPatternRadius(placements, room, scaleFactor) {
+  const r = room.diameterM / 2;
+  const cxFt = r * FEET_PER_METER;
+  const cyFt = r * FEET_PER_METER;
+  return placements.map(p => ({
+    x: cxFt + (p.x - cxFt) * scaleFactor,
+    y: cyFt + (p.y - cyFt) * scaleFactor
+  }));
+}
+
+function optimizeSmallCircularSymmetry(regular, room, samples, clearanceM) {
+  let best = regular;
+  let bestScore = placementGeometryScore(regular, room, samples, clearanceM);
+  for (const factor of [0.72,0.80,0.88,0.94,1.00,1.06,1.12,1.18]) {
+    const candidate = scaleCircularPatternRadius(regular, room, factor);
+    const valid = candidate.every(p => {
+      const xM = p.x / FEET_PER_METER;
+      const yM = p.y / FEET_PER_METER;
+      return isPointInsideRoomMeters(xM, yM, room) &&
+        distanceToRoomBoundaryMeters(xM, yM, room) + 1e-6 >= clearanceM;
+    });
+    if (!valid) continue;
+    const score = placementGeometryScore(candidate, room, samples, clearanceM);
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return {placements: best, score: bestScore};
 }
 
 function relaxPlacements(placements, room, iterations = 4, blend = 0.58, clearanceM = 0) {
@@ -979,6 +1016,34 @@ function optimizePlacementsForRoom(basePlacements, coverage, room, mode = "balan
   }
 
   const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
+
+  // For 1–6 speakers in a circle, symmetry and centring are a hard constraint.
+  // Optimization may change only the common radius, never shift the pattern off-centre.
+  if (room.shape === "circle" && base.length <= 6) {
+    if (mode === "regular") {
+      return {
+        placements: regular,
+        optimized: false,
+        method: "Symetrické rozmístění vůči středu",
+        improvementPct: baseScore > 0 ? Math.max(0, (baseScore - regularScore) / baseScore * 100) : 0,
+        clearanceM
+      };
+    }
+
+    const symmetricBest = optimizeSmallCircularSymmetry(regular, room, samples, clearanceM);
+    const target = mode === "balanced"
+      ? blendPlacements(regular, symmetricBest.placements, room, 0.35, clearanceM)
+      : symmetricBest.placements;
+    const targetScore = placementGeometryScore(target, room, samples, clearanceM);
+
+    return {
+      placements: target,
+      optimized: mode !== "regular",
+      method: mode === "balanced" ? "Vyvážené symetrické rozmístění" : "Optimalizované symetrické rozmístění",
+      improvementPct: regularScore > 0 ? Math.max(0, (regularScore - targetScore) / regularScore * 100) : 0,
+      clearanceM
+    };
+  }
 
   if (mode === "regular") {
     return {
@@ -1334,6 +1399,38 @@ function updateHeatmapScaleLabels(heatmap) {
 
   low.textContent = `${heatmap.min.toFixed(0)} dB`;
   high.textContent = `${heatmap.max.toFixed(0)} dB`;
+}
+
+let audioObjectUrl = null;
+const AUDIO_BASE_VOLUME = 0.32;
+
+function updateSpatialAudioGain(listenerSPL = null) {
+  const audio = document.getElementById("spatialAudio");
+  const status = document.getElementById("audioGainStatus");
+  const s = appState.latest;
+  if (!audio || !status || !s || !audio.src) return;
+
+  const currentSPL = Number.isFinite(listenerSPL)
+    ? listenerSPL
+    : calculateSPLAtPoint({
+        xFt: appState.listenerXFt,
+        yFt: appState.listenerYFt,
+        listenerHeightFt: s.listenerHeightFt,
+        placements: s.placements,
+        mountingHeightFt: s.mountingHeightFt,
+        speaker: s.speaker,
+        tap: s.power.recommendedTap
+      });
+
+  const referenceSPL = s.heatmap?.average;
+  if (!Number.isFinite(currentSPL) || !Number.isFinite(referenceSPL)) return;
+
+  const deltaDb = currentSPL - referenceSPL;
+  const relativeGain = Math.pow(10, deltaDb / 20);
+  audio.volume = Math.max(0.03, Math.min(1, AUDIO_BASE_VOLUME * relativeGain));
+
+  const signed = `${deltaDb >= 0 ? "+" : ""}${deltaDb.toFixed(1).replace(".", ",")} dB`;
+  status.textContent = `${signed} vůči průměru`;
 }
 
 let appState = {
@@ -1717,6 +1814,7 @@ function refreshListenerOnly() {
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
+  updateSpatialAudioGain(listenerSPL);
 
   drawFloorPlan({
     lengthM: s.lengthM,
@@ -2530,6 +2628,7 @@ function calculate() {
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
     listenerHeightFt, mountingHeightFt
   };
+  updateSpatialAudioGain(listenerSPL);
 
   drawFloorPlan({
     lengthM,
@@ -2592,6 +2691,47 @@ document.getElementById("copySpeakerCoordinates")?.addEventListener("click", asy
   }, 1400);
 });
 
+
+const spatialAudio = document.getElementById("spatialAudio");
+const audioFileInput = document.getElementById("audioFileInput");
+const audioPlayToggle = document.getElementById("audioPlayToggle");
+const audioGainStatus = document.getElementById("audioGainStatus");
+
+function updateAudioPlayButton() {
+  if (!audioPlayToggle || !spatialAudio) return;
+  audioPlayToggle.textContent = spatialAudio.paused ? "Spustit" : "Pozastavit";
+}
+
+audioFileInput?.addEventListener("change", () => {
+  const file = audioFileInput.files?.[0];
+  if (!file || !spatialAudio) return;
+  if (audioObjectUrl) URL.revokeObjectURL(audioObjectUrl);
+  audioObjectUrl = URL.createObjectURL(file);
+  spatialAudio.src = audioObjectUrl;
+  spatialAudio.load();
+  if (audioPlayToggle) audioPlayToggle.disabled = false;
+  if (audioGainStatus) audioGainStatus.textContent = "Připraveno";
+  updateSpatialAudioGain();
+});
+
+audioPlayToggle?.addEventListener("click", async () => {
+  if (!spatialAudio?.src) return;
+  try {
+    if (spatialAudio.paused) {
+      updateSpatialAudioGain();
+      await spatialAudio.play();
+    } else {
+      spatialAudio.pause();
+    }
+  } catch (error) {
+    console.warn("Audio playback failed:", error);
+  }
+  updateAudioPlayButton();
+});
+
+spatialAudio?.addEventListener("play", updateAudioPlayButton);
+spatialAudio?.addEventListener("pause", updateAudioPlayButton);
+spatialAudio?.addEventListener("ended", updateAudioPlayButton);
 
 document.getElementById("roomShape")?.addEventListener("change", () => {
   updateRoomShapeUi();

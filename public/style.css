@@ -873,3 +873,97 @@ input[type="number"]::-webkit-outer-spin-button {
   padding: 7px 11px;
   font-size: 0.82rem;
 }
+
+
+/* v0.96 – čistší technické detaily a audio demonstrace */
+.floor-heading {
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.floor-audio-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 520px;
+}
+
+.audio-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audio-file-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #dfe6ee;
+  background: rgba(255,255,255,0.035);
+}
+
+.audio-gain-status {
+  min-width: 135px;
+  color: var(--muted, #9ba8b7);
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.technical-details-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.technical-details-summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 22px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.technical-details-summary::-webkit-details-marker { display: none; }
+
+.technical-details-summary strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1.05rem;
+}
+
+.technical-details-hint {
+  color: var(--muted, #9ba8b7);
+  font-size: 0.84rem;
+}
+
+.technical-details-panel[open] .technical-details-hint::before { content: "Sbalit"; }
+.technical-details-panel[open] .technical-details-hint { font-size: 0; }
+.technical-details-panel[open] .technical-details-hint::before { font-size: 0.84rem; }
+
+.technical-details-content {
+  padding: 0 18px 18px;
+}
+
+.technical-details-content > .panel {
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .floor-audio-tools {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .audio-gain-status { text-align: left; }
+}

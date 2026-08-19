@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.95" />
+  <link rel="stylesheet" href="style.css?v=0.96" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.95</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.96</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -274,10 +274,17 @@
         </div>
 
         <div class="panel floor-panel">
-          <div class="section-heading result-heading">
+          <div class="section-heading result-heading floor-heading">
             <div>
               <div class="eyebrow">PŮDORYS</div>
               <h2>Rozmístění reproduktorů</h2>
+            </div>
+            <div class="floor-audio-tools" aria-label="Audio demonstrace SPL">
+              <label class="audio-file-label" for="audioFileInput">Vybrat skladbu</label>
+              <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
+              <button id="audioPlayToggle" class="secondary-button small-button" type="button" disabled>Spustit</button>
+              <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
+              <audio id="spatialAudio" preload="metadata"></audio>
             </div>
           </div>
 
@@ -299,6 +306,15 @@
         </div>
 
 
+        <details class="panel technical-details-panel">
+          <summary class="technical-details-summary">
+            <span>
+              <span class="eyebrow">DETAILY NÁVRHU</span>
+              <strong>Technické detaily</strong>
+            </span>
+            <span class="technical-details-hint">Rozbalit</span>
+          </summary>
+          <div class="technical-details-content">
         <div class="panel section-view-panel">
           <div class="section-heading result-heading">
             <div>
@@ -354,6 +370,9 @@
             <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
           </dl>
         </div>
+
+          </div>
+        </details>
 
         <div class="panel speaker-coordinates-panel">
           <div class="section-heading">
@@ -444,6 +463,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.95"></script>
+  <script src="app.js?v=0.96"></script>
 </body>
 </html>
