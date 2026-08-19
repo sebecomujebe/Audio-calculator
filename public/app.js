@@ -1,4 +1,4 @@
-const APP_VERSION = "0.115";
+const APP_VERSION = "0.116";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2690,48 +2690,69 @@ function selectBestLayoutForCount(args) {
 function candidateCountsForRecommendation(coverage, room) {
   const spacingM = Math.max(
     0.25,
-    coverage.targetSpacing/FEET_PER_METER
+    coverage.targetSpacing / FEET_PER_METER
   );
+
   const areaBased = Math.max(
     1,
     Math.ceil(
-      room.areaM2/Math.max(0.25,spacingM*spacingM)
+      room.areaM2 / Math.max(0.25, spacingM * spacingM)
     )
   );
-  const gridBased = Math.max(1,coverage.count);
+
+  const gridBased = Math.max(1, coverage.count);
+
   const reference = Math.max(
     1,
-    Math.round(areaBased*0.68+gridBased*0.32)
+    Math.round(areaBased * 0.68 + gridBased * 0.32)
   );
 
-  const lo = Math.max(1,Math.floor(reference*0.45));
+  // Reference už neurčuje spodní hranici.
+  // Je to pouze odhad, kam až má smysl hledat.
   const hi = Math.max(
-    lo+8,
-    Math.ceil(reference*1.60)+4
+    8,
+    Math.ceil(reference * 1.65) + 4,
+    gridBased + 4,
+    areaBased + 4
   );
 
-  const values = [];
+  const values = new Set();
 
-  // Do 64 repro testujeme opravdu KAŽDÝ počet.
-  // Tím automatika nemůže přeskočit např. kvalitních 20 ks
-  // a následně doporučit horších 24 ks.
+  // Běžné instalace: testujeme KAŽDÝ počet od 1.
   if (hi <= 64) {
-    for (let n=lo; n<=hi; n++) values.push(n);
+    for (let n = 1; n <= hi; n++) {
+      values.add(n);
+    }
   } else {
-    // Velké haly: hrubé hledání + souvislé okolí reference.
-    const step = Math.max(2,Math.ceil((hi-lo)/20));
-    for (let n=lo; n<=hi; n+=step) values.push(n);
+    // Velké haly:
+    // 1) nízké počty 1–16 vždy souvisle,
+    // 2) okolí reference souvisle,
+    // 3) zbytek hrubším krokem.
+    for (let n = 1; n <= Math.min(16, hi); n++) {
+      values.add(n);
+    }
+
     for (
-      let n=Math.max(lo,reference-8);
-      n<=Math.min(hi,reference+10);
+      let n = Math.max(1, reference - 12);
+      n <= Math.min(hi, reference + 14);
       n++
-    ) values.push(n);
+    ) {
+      values.add(n);
+    }
+
+    const step = Math.max(2, Math.ceil(hi / 24));
+    for (let n = 17; n <= hi; n += step) {
+      values.add(n);
+    }
+
+    values.add(areaBased);
+    values.add(gridBased);
+    values.add(reference);
   }
 
-  values.push(reference,areaBased,gridBased);
-  return [...new Set(values)]
-    .filter(n=>n>0)
-    .sort((a,b)=>a-b);
+  return [...values]
+    .filter(n => n > 0)
+    .sort((a,b) => a - b);
 }
 
 function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
@@ -2829,13 +2850,55 @@ function removeDominatedBalancedLayouts(layouts) {
   );
 }
 
+
+function getLowerVerificationCounts(chosenCount, allCounts, maxChecks = 8) {
+  if (!(chosenCount > 1)) return [];
+
+  const lower = allCounts
+    .filter(n => n < chosenCount)
+    .sort((a,b) => b - a);
+
+  // Nejdřív několik bezprostředně nižších hodnot.
+  const selected = lower.slice(0, maxChecks);
+
+  // U malých počtů vždy ověříme úplně vše až k 1.
+  if (chosenCount <= 12) {
+    return lower.slice().sort((a,b) => a - b);
+  }
+
+  // A vždy zahrneme 1–4, aby automatika nikdy nepřehlédla
+  // překvapivě účinné malé řešení.
+  for (const n of [1,2,3,4]) {
+    if (n < chosenCount && allCounts.includes(n) && !selected.includes(n)) {
+      selected.push(n);
+    }
+  }
+
+  return [...new Set(selected)].sort((a,b) => a - b);
+}
+
+function coverageLayoutMeetsNearOptimalThreshold(layout, referenceAcoustic, targetSPL) {
+  if (!layout) return false;
+  const a = layout.freeAcoustic || layout.acoustic;
+  if (!a || !referenceAcoustic) return false;
+
+  return (
+    a.tolerancePct >= Math.max(95, referenceAcoustic.tolerancePct - 1.0) &&
+    a.spread <= referenceAcoustic.spread + 0.65 &&
+    a.largestHolePct <= referenceAcoustic.largestHolePct + 0.7 &&
+    a.average >= targetSPL - 1.5 &&
+    a.min >= targetSPL - 7
+  );
+}
+
 function recommendSpeakerCountAndLayout(args) {
-  const cacheKey = `v115;${recommendationCacheKey(args)}`;
+  const cacheKey = `v116;${recommendationCacheKey(args)}`;
   const cached = COUNT_RECOMMENDATION_CACHE.get(cacheKey);
   if (cached) return cached;
 
   const counts = candidateCountsForRecommendation(
-    args.coverage,args.room
+    args.coverage,
+    args.room
   );
 
   // ----------------------------------------------------------
@@ -2844,85 +2907,70 @@ function recommendSpeakerCountAndLayout(args) {
   if (args.mode === "balanced") {
     const coarse = [];
 
-    // Každý počet se nejprve vyhodnotí rychle.
     for (const count of counts) {
       const layout = selectBestLayoutForCount({
-        ...args,count,quality:"coarse"
+        ...args,
+        count,
+        quality:"coarse"
       });
-      if (layout) coarse.push({count,...layout});
+      if (layout) coarse.push({count, ...layout});
     }
+
     if (!coarse.length) return null;
 
-    // Přesně přepočítáme všechny rozumné počty, ne jen několik
-    // kandidátů z hrubého shortlistu.
     const coarseBestTolerance = Math.max(
-      ...coarse.map(x=>x.acoustic.tolerancePct)
+      ...coarse.map(x => x.acoustic.tolerancePct)
     );
 
-    let fullCounts = coarse
-      .filter(x =>
-        x.isStructuredLattice &&
-        (
-          x.acoustic.tolerancePct >= 94 ||
-          x.acoustic.tolerancePct >= coarseBestTolerance-3.0
+    const candidateFullCounts = new Set(
+      coarse
+        .filter(x =>
+          x.isStructuredLattice &&
+          (
+            x.acoustic.tolerancePct >= 94 ||
+            x.acoustic.tolerancePct >= coarseBestTolerance - 3
+          )
         )
-      )
-      .map(x=>x.count);
+        .map(x => x.count)
+    );
 
-    // Kdyby hrubá síť byla nepřesná, zahrneme i sousedy.
-    const expanded = new Set(fullCounts);
-    for (const n of fullCounts) {
-      if (counts.includes(n-1)) expanded.add(n-1);
-      if (counts.includes(n+1)) expanded.add(n+1);
-    }
-    fullCounts = [...expanded].sort((a,b)=>a-b);
-
-    // Bezpečnostní fallback.
-    if (!fullCounts.length) {
-      fullCounts = coarse
-        .slice()
-        .sort((a,b)=>b.score-a.score)
-        .slice(0,8)
-        .map(x=>x.count)
-        .sort((a,b)=>a-b);
+    // U běžných projektů je počet kandidátů zvládnutelný:
+    // pokud je odhad nízký, raději přepočítáme přesně všechny nízké počty.
+    for (const n of counts) {
+      if (n <= 12) candidateFullCounts.add(n);
     }
 
     const refined = [];
-    for (const count of fullCounts) {
+    for (const count of [...candidateFullCounts].sort((a,b)=>a-b)) {
       const layout = selectBestLayoutForCount({
-        ...args,count,quality:"full"
+        ...args,
+        count,
+        quality:"full"
       });
-      if (layout) refined.push({count,...layout});
+      if (layout) refined.push({count, ...layout});
     }
 
-    const pool = refined.length ? refined : coarse;
+    let pool = refined.length ? refined : coarse;
 
-    // Nejprve odstraníme varianty, které jsou objektivně horší
-    // než jiná varianta s menším nebo stejným počtem.
-    const nonDominated =
-      removeDominatedBalancedLayouts(pool);
+    // Pareto filtr zahodí varianty, které jsou objektivně horší
+    // než menší nebo stejně početná alternativa.
+    let nonDominated = removeDominatedBalancedLayouts(pool);
 
     let eligible = nonDominated.filter(x =>
-      balancedLayoutMeetsBasicQuality(x,args.targetSPL)
+      balancedLayoutMeetsBasicQuality(x, args.targetSPL)
     );
 
     if (!eligible.length) {
-      // Pokud 95 % není dosažitelných, použijeme Pareto množinu
-      // a vezmeme nejlepší geometricko-akustický kompromis.
-      eligible = nonDominated.length
-        ? nonDominated
-        : pool;
+      eligible = nonDominated.length ? nonDominated : pool;
     }
 
     const bestTolerance = Math.max(
-      ...eligible.map(x=>x.acoustic.tolerancePct)
+      ...eligible.map(x => x.acoustic.tolerancePct)
     );
 
-    // Pokud některý menší počet už má 100 % (resp. prakticky 100 %),
-    // vyšší počet musí prokázat významné zlepšení spreadu/minima.
     const perfect = eligible
       .filter(x => x.acoustic.tolerancePct >= 99.5)
-      .sort((a,b)=>a.count-b.count);
+      .sort((a,b) => a.count - b.count);
 
     let chosen;
 
@@ -2932,52 +2980,134 @@ function recommendSpeakerCountAndLayout(args) {
       const challengers = perfect.filter(x =>
         x.count > smallestPerfect.count &&
         (
-          x.acoustic.spread <= smallestPerfect.acoustic.spread-0.8 ||
-          x.acoustic.min >= smallestPerfect.acoustic.min+0.8
+          x.acoustic.spread <= smallestPerfect.acoustic.spread - 0.8 ||
+          x.acoustic.min >= smallestPerfect.acoustic.min + 0.8
         )
       );
 
-      if (!challengers.length) {
-        chosen = smallestPerfect;
-      } else {
-        // Vyšší počet smí vyhrát jen za opravdu měřitelné zlepšení.
-        chosen = [smallestPerfect,...challengers]
-          .sort((a,b) => {
-            const utilityA =
-              a.acoustic.spread +
-              a.count*0.08 -
-              a.acoustic.min*0.03;
-            const utilityB =
-              b.acoustic.spread +
-              b.count*0.08 -
-              b.acoustic.min*0.03;
-            return utilityA-utilityB;
-          })[0];
-      }
+      chosen = challengers.length
+        ? [smallestPerfect, ...challengers]
+            .sort((a,b) => {
+              const ua =
+                a.acoustic.spread +
+                a.count * 0.08 -
+                a.acoustic.min * 0.03;
+              const ub =
+                b.acoustic.spread +
+                b.count * 0.08 -
+                b.acoustic.min * 0.03;
+              return ua - ub;
+            })[0]
+        : smallestPerfect;
     } else {
       const nearBest = eligible.filter(x =>
-        x.acoustic.tolerancePct >= Math.max(95,bestTolerance-1.0)
+        x.acoustic.tolerancePct >= Math.max(95, bestTolerance - 1.0)
       );
 
       chosen = (nearBest.length ? nearBest : eligible)
         .slice()
         .sort((a,b) =>
-          a.count-b.count ||
-          a.acoustic.largestHolePct-b.acoustic.largestHolePct ||
-          a.acoustic.spread-b.acoustic.spread ||
-          b.acoustic.min-a.acoustic.min ||
-          a.acoustic.spacingBalanceRatio-b.acoustic.spacingBalanceRatio ||
-          b.score-a.score
+          a.count - b.count ||
+          a.acoustic.largestHolePct - b.acoustic.largestHolePct ||
+          a.acoustic.spread - b.acoustic.spread ||
+          b.acoustic.min - a.acoustic.min ||
+          a.acoustic.spacingBalanceRatio - b.acoustic.spacingBalanceRatio ||
+          b.score - a.score
         )[0];
+    }
+
+    // Důležitá pojistka:
+    // po nalezení kandidáta přesně přepočítáme i nižší počty,
+    // které mohly v coarse fázi vypadat hůř.
+    const verifyCounts = getLowerVerificationCounts(
+      chosen.count,
+      counts,
+      10
+    );
+
+    const verifiedLower = [];
+    for (const count of verifyCounts) {
+      if (pool.some(x => x.count === count && refined.includes(x))) continue;
+
+      const layout = selectBestLayoutForCount({
+        ...args,
+        count,
+        quality:"full"
+      });
+
+      if (layout) {
+        verifiedLower.push({count, ...layout});
+      }
+    }
+
+    if (verifiedLower.length) {
+      pool = [...pool, ...verifiedLower];
+      nonDominated = removeDominatedBalancedLayouts(pool);
+
+      const verifiedEligible = nonDominated.filter(x =>
+        balancedLayoutMeetsBasicQuality(x, args.targetSPL)
+      );
+
+      if (verifiedEligible.length) {
+        const verifiedPerfect = verifiedEligible
+          .filter(x => x.acoustic.tolerancePct >= 99.5)
+          .sort((a,b) => a.count - b.count);
+
+        if (verifiedPerfect.length) {
+          const smallestPerfect = verifiedPerfect[0];
+
+          // Pokud menší varianta už má 100 %, automatika ji drží,
+          // dokud vyšší počet nepřinese opravdu výrazný zisk.
+          const betterHigher = verifiedPerfect.filter(x =>
+            x.count > smallestPerfect.count &&
+            (
+              x.acoustic.spread <= smallestPerfect.acoustic.spread - 0.8 ||
+              x.acoustic.min >= smallestPerfect.acoustic.min + 0.8
+            )
+          );
+
+          chosen = betterHigher.length
+            ? [smallestPerfect, ...betterHigher]
+                .sort((a,b) => {
+                  const ua =
+                    a.acoustic.spread +
+                    a.count * 0.08 -
+                    a.acoustic.min * 0.03;
+                  const ub =
+                    b.acoustic.spread +
+                    b.count * 0.08 -
+                    b.acoustic.min * 0.03;
+                  return ua - ub;
+                })[0]
+            : smallestPerfect;
+        } else {
+          const tol = Math.max(
+            ...verifiedEligible.map(x => x.acoustic.tolerancePct)
+          );
+
+          const near = verifiedEligible.filter(x =>
+            x.acoustic.tolerancePct >= Math.max(95, tol - 1)
+          );
+
+          chosen = (near.length ? near : verifiedEligible)
+            .slice()
+            .sort((a,b) =>
+              a.count - b.count ||
+              a.acoustic.spread - b.acoustic.spread ||
+              b.acoustic.min - a.acoustic.min
+            )[0];
+        }
+      }
     }
 
     const result = {
       recommendedCount:chosen.count,
       chosen,
-      evaluated:[...coarse,...refined],
+      evaluated:[...coarse, ...refined, ...verifiedLower],
       toleranceFloor:95,
       targetMet:balancedLayoutMeetsBasicQuality(
-        chosen,args.targetSPL
+        chosen,
+        args.targetSPL
       ),
       balancedQuality:{
         largestHolePct:chosen.acoustic.largestHolePct,
@@ -2986,7 +3116,10 @@ function recommendSpeakerCountAndLayout(args) {
     };
 
     cacheSetLimited(
-      COUNT_RECOMMENDATION_CACHE,cacheKey,result,48
+      COUNT_RECOMMENDATION_CACHE,
+      cacheKey,
+      result,
+      48
     );
     return result;
   }
@@ -2995,99 +3128,188 @@ function recommendSpeakerCountAndLayout(args) {
   // NEJLEPŠÍ POKRYTÍ
   // ----------------------------------------------------------
   const coarse = [];
+
   for (const count of counts) {
     const layout = selectBestLayoutForCount({
-      ...args,count,quality:"coarse"
+      ...args,
+      count,
+      quality:"coarse"
     });
-    if (layout) coarse.push({count,...layout});
+    if (layout) coarse.push({count, ...layout});
   }
+
   if (!coarse.length) return null;
 
-  const acousticOf = x=>x.freeAcoustic||x.acoustic;
-  const bestTolerance = Math.max(
-    ...coarse.map(x=>acousticOf(x).tolerancePct)
-  );
-  const bestAcoustic = coarse.slice().sort((a,b)=>
-    coverageAcousticQuality(acousticOf(b))-
-    coverageAcousticQuality(acousticOf(a))
-  )[0];
-  const bestA = acousticOf(bestAcoustic);
+  const acousticOf = x => x.freeAcoustic || x.acoustic;
 
-  let promising = coarse.filter(x=>{
-    const a=acousticOf(x);
+  const bestAcousticCoarse = coarse
+    .slice()
+    .sort((a,b) =>
+      coverageAcousticQuality(acousticOf(b)) -
+      coverageAcousticQuality(acousticOf(a))
+    )[0];
+
+  const bestCoarseA = acousticOf(bestAcousticCoarse);
+  const bestCoarseTolerance = Math.max(
+    ...coarse.map(x => acousticOf(x).tolerancePct)
+  );
+
+  let promising = coarse.filter(x => {
+    const a = acousticOf(x);
     return (
-      a.tolerancePct >= Math.max(95,bestTolerance-1.0) &&
-      a.spread <= bestA.spread+0.8 &&
-      a.largestHolePct <= bestA.largestHolePct+0.8 &&
-      a.average >= args.targetSPL-1.5 &&
-      a.min >= args.targetSPL-7
+      a.tolerancePct >= Math.max(95, bestCoarseTolerance - 1.0) &&
+      a.spread <= bestCoarseA.spread + 0.8 &&
+      a.largestHolePct <= bestCoarseA.largestHolePct + 0.8 &&
+      a.average >= args.targetSPL - 1.5 &&
+      a.min >= args.targetSPL - 7
     );
   });
 
   if (!promising.length) {
-    promising=coarse
+    promising = coarse
       .slice()
-      .sort((a,b)=>
-        coverageAcousticQuality(acousticOf(b))-
+      .sort((a,b) =>
+        coverageAcousticQuality(acousticOf(b)) -
         coverageAcousticQuality(acousticOf(a))
       )
-      .slice(0,6);
+      .slice(0,8);
   }
 
-  const refineCounts=new Set(
+  const refineCounts = new Set(
     promising
-      .slice()
-      .sort((a,b)=>a.count-b.count)
-      .slice(0,6)
-      .map(x=>x.count)
+      .map(x => x.count)
   );
-  refineCounts.add(bestAcoustic.count);
 
-  const refined=[];
-  for (const count of [...refineCounts].sort((a,b)=>a-b)) {
-    const layout=selectBestLayoutForCount({
-      ...args,count,quality:"full"
-    });
-    if (layout) refined.push({count,...layout});
+  // Nízké počty vždy přesně: to je zásadní změna v0.116.
+  for (const n of counts) {
+    if (n <= 8) refineCounts.add(n);
   }
 
-  const pool=refined.length?refined:promising;
-  const refinedBest=pool.slice().sort((a,b)=>
-    coverageAcousticQuality(acousticOf(b))-
-    coverageAcousticQuality(acousticOf(a))
-  )[0];
-  const reference=acousticOf(refinedBest);
-  const maxTol=Math.max(...pool.map(x=>acousticOf(x).tolerancePct));
+  refineCounts.add(bestAcousticCoarse.count);
 
-  let nearBest=pool.filter(x=>{
-    const a=acousticOf(x);
-    return (
-      a.tolerancePct >= Math.max(95,maxTol-1.0) &&
-      a.spread <= reference.spread+0.65 &&
-      a.largestHolePct <= reference.largestHolePct+0.7 &&
-      a.average >= args.targetSPL-1.5 &&
-      a.min >= args.targetSPL-7
-    );
-  });
+  const refined = [];
 
-  if (!nearBest.length) nearBest=[refinedBest];
+  for (const count of [...refineCounts].sort((a,b)=>a-b)) {
+    const layout = selectBestLayoutForCount({
+      ...args,
+      count,
+      quality:"full"
+    });
 
-  const chosen=nearBest.slice().sort((a,b)=>
-    a.count-b.count ||
-    coverageAcousticQuality(acousticOf(b))-
-    coverageAcousticQuality(acousticOf(a))
-  )[0];
+    if (layout) {
+      refined.push({count, ...layout});
+    }
+  }
 
-  const result={
+  if (!refined.length) return null;
+
+  let refinedBest = refined
+    .slice()
+    .sort((a,b) =>
+      coverageAcousticQuality(acousticOf(b)) -
+      coverageAcousticQuality(acousticOf(a))
+    )[0];
+
+  let reference = acousticOf(refinedBest);
+  let maxTol = Math.max(
+    ...refined.map(x => acousticOf(x).tolerancePct)
+  );
+
+  let nearBest = refined.filter(x =>
+    coverageLayoutMeetsNearOptimalThreshold(
+      x,
+      {
+        ...reference,
+        tolerancePct:maxTol
+      },
+      args.targetSPL
+    )
+  );
+
+  if (!nearBest.length) {
+    nearBest = [refinedBest];
+  }
+
+  let chosen = nearBest
+    .slice()
+    .sort((a,b) =>
+      a.count - b.count ||
+      coverageAcousticQuality(acousticOf(b)) -
+      coverageAcousticQuality(acousticOf(a))
+    )[0];
+
+  // Po volbě znovu explicitně ověříme všechny relevantní nižší počty.
+  const verifyCounts = getLowerVerificationCounts(
+    chosen.count,
+    counts,
+    10
+  );
+
+  const verifiedLower = [];
+
+  for (const count of verifyCounts) {
+    let existing = refined.find(x => x.count === count);
+
+    if (!existing) {
+      const layout = selectBestLayoutForCount({
+        ...args,
+        count,
+        quality:"full"
+      });
+
+      if (layout) {
+        existing = {count, ...layout};
+        verifiedLower.push(existing);
+      }
+    }
+  }
+
+  const finalPool = [...refined, ...verifiedLower];
+
+  refinedBest = finalPool
+    .slice()
+    .sort((a,b) =>
+      coverageAcousticQuality(acousticOf(b)) -
+      coverageAcousticQuality(acousticOf(a))
+    )[0];
+
+  reference = acousticOf(refinedBest);
+  maxTol = Math.max(
+    ...finalPool.map(x => acousticOf(x).tolerancePct)
+  );
+
+  const finalNearBest = finalPool.filter(x =>
+    coverageLayoutMeetsNearOptimalThreshold(
+      x,
+      {
+        ...reference,
+        tolerancePct:maxTol
+      },
+      args.targetSPL
+    )
+  );
+
+  chosen = (finalNearBest.length ? finalNearBest : [refinedBest])
+    .slice()
+    .sort((a,b) =>
+      a.count - b.count ||
+      coverageAcousticQuality(acousticOf(b)) -
+      coverageAcousticQuality(acousticOf(a))
+    )[0];
+
+  const result = {
     recommendedCount:chosen.count,
     chosen,
-    evaluated:[...coarse,...refined],
+    evaluated:[...coarse, ...refined, ...verifiedLower],
     toleranceFloor:95,
-    targetMet:acousticOf(chosen).tolerancePct>=95
+    targetMet:acousticOf(chosen).tolerancePct >= 95
   };
 
   cacheSetLimited(
-    COUNT_RECOMMENDATION_CACHE,cacheKey,result,48
+    COUNT_RECOMMENDATION_CACHE,
+    cacheKey,
+    result,
+    48
   );
   return result;
 }
