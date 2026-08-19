@@ -2358,3 +2358,19 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text, #f4f7fb);
   font-weight: 700;
 }
+
+
+/* v0.128 */
+.parameters-title {
+  color: var(--accent, #ff7a1a);
+  text-transform: uppercase;
+}
+
+.floor-speaker-model-separator {
+  color: var(--muted, #9aa8b6);
+}
+
+#floorSpeakerModel {
+  color: var(--text, #f4f7fb);
+  font-weight: 700;
+}

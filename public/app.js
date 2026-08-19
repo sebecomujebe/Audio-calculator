@@ -1,4 +1,4 @@
-const APP_VERSION = "0.127";
+const APP_VERSION = "0.128";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -3095,12 +3095,12 @@ function optimizeCircleRingRadius(
 
   const currentOuterRadiusM = Math.max(...radii);
 
-  // Půl rozteče je výchozí geometrická poloha, nikoli tvrdá hranice.
-  // Pokud coverage zůstává stejné, dovolíme jít až přibližně na
-  // 0,18 rozteče od stěny.
+  // Krajní reproduktory držíme výrazněji od stěny, aby zbytečně
+  // nevyzařovaly velkou část energie mimo místnost. Odstup je
+  // odvozený od návrhové rozteče, takže se škáluje s pokrytím.
   const minimumWallMarginM = Math.max(
-    0.15,
-    targetSpacingM*0.18
+    0.40,
+    targetSpacingM*0.35
   );
   const maximumOuterRadiusM = Math.max(
     currentOuterRadiusM,
@@ -4353,9 +4353,6 @@ function drawFloorPlan({
   const floorClipId = "floor-room-clip";
   const floorDefs = `<defs>${roomClipPath(room, ox, oy, scale, floorClipId)}</defs>`;
 
-  const title = `<text x="${W/2}" y="${oy - 22}" text-anchor="middle"
-    fill="#dfe6ee" font-size="16" font-weight="700">${speakerModel}</text>`;
-
   const dims = `
     <text x="${W/2}" y="${oy + roomH + 34}" text-anchor="middle"
       fill="#dfe6ee" font-size="16" font-weight="700">${widthM.toFixed(1)} m</text>
@@ -4412,7 +4409,7 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
     </g>
   `;
 
-  svg.innerHTML = floorDefs + rect + `<g clip-path="url(#${floorClipId})">${heatCells}</g>` + title + dims + circles + listener;
+  svg.innerHTML = floorDefs + rect + `<g clip-path="url(#${floorClipId})">${heatCells}</g>` + dims + circles + listener;
   updateHeatmapScaleLabels(heatmap);
 
   appState.latest = {
@@ -5577,6 +5574,10 @@ function calculate() {
   const floorSpeakerCount = document.getElementById("floorSpeakerCount");
   if (floorSpeakerCount) {
     floorSpeakerCount.textContent = `${effectiveCoverage.count} ks`;
+  }
+  const floorSpeakerModel = document.getElementById("floorSpeakerModel");
+  if (floorSpeakerModel) {
+    floorSpeakerModel.textContent = speaker.model;
   }
   document.getElementById("layoutValue").textContent = placementOptimization.method;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
