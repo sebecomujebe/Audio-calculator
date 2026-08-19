@@ -1,4 +1,4 @@
-const APP_VERSION = "0.128";
+const APP_VERSION = "0.130";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -3000,9 +3000,13 @@ function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
 }
 
 function buildCircleCoverageDesignCandidates(room, coverage) {
+  // v0.130: geometry follows the original SSC grid spacing exactly.
+  // SSC first calculates targetSpacing and then fits the grid into the room,
+  // so the real spacing can be slightly smaller. This fitted spacing is the
+  // value we preserve for all derived circle layouts.
   const targetSpacingM = Math.max(
     0.15,
-    coverage.targetSpacing/FEET_PER_METER
+    Math.min(coverage.spacingX, coverage.spacingY)/FEET_PER_METER
   );
 
   const candidates = [
@@ -3402,75 +3406,63 @@ function pruneCircleAlignedCandidate(
 }
 
 function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
-  const allCandidates = buildCircleCoverageDesignCandidates(
-    room,coverage
-  );
-
-  const allowedFamilies =
-    circleMode === "circle-rings"
-      ? new Set(["rings-center","rings-no-center"])
-      : new Set(["rows-0"]);
-
-  let candidates = allCandidates.filter(c =>
-    allowedFamilies.has(c.family)
-  );
-
+  // v0.130 – SSC geometry is the primary rule.
+  // We never stretch spacing to reduce speaker count.  For aligned placement
+  // we use the exact grid produced by calculateCoverage()/calculatePlacements:
+  // same X/Y spacing and half-cell offsets as the original Sonance SSC, then
+  // simply omit grid points that fall outside the circular room.
   if (circleMode === "circle-aligned") {
-    candidates = candidates.map(c =>
-      pruneCircleAlignedCandidate(
-        c,
-        room,
-        coverage
-      )
+    const placements = calculatePlacements(coverage, room);
+    if (!placements.length) return null;
+
+    const spacingM = Math.max(
+      0.15,
+      Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
     );
+
+    return {
+      placements,
+      count: placements.length,
+      method: `Pevná SSC mřížka ${coverage.columns} × ${coverage.rows} oříznutá kruhem`,
+      family: "ssc-grid-circle",
+      designCoveragePct: circleDesignCoveragePct(room, placements, coverage),
+      requiredDesignCoveragePct: null,
+      geometryScore: circlePlacementGeometryScore(room, placements, spacingM),
+      clearanceM: recommendedWallClearanceMeters(coverage, room),
+      isStructuredLattice: true,
+      score: 0,
+      source: "ssc-fixed-spacing",
+      radialScale: 1,
+      removedSymmetricCount: 0
+    };
   }
+
+  // Circular/ring layout keeps the SAME fitted SSC spacing as the aligned
+  // grid. We choose the smaller valid ring family, but do not acoustically
+  // expand/contract the rings afterwards.
+  const candidates = buildCircleCoverageDesignCandidates(room, coverage)
+    .filter(c => ["rings-center", "rings-no-center"].includes(c.family));
 
   if (!candidates.length) return null;
 
-  const requiredCoveragePct =
-    circleMode === "circle-aligned"
-      ? circleAlignedRequiredCoveragePct(coverage)
-      : 99.5;
+  // Prefer the smallest count. Coverage percentage is only a tie-breaker;
+  // SPL remains a separate verification layer, not a license to enlarge gaps.
+  candidates.sort((a,b) =>
+    a.count - b.count ||
+    b.designCoveragePct - a.designCoveragePct ||
+    a.geometryScore - b.geometryScore
+  );
 
-  const complete = candidates
-    .filter(c =>
-      c.designCoveragePct >= requiredCoveragePct
-    )
-    .sort((a,b)=>
-      a.count-b.count ||
-      b.designCoveragePct-a.designCoveragePct ||
-      a.geometryScore-b.geometryScore
-    );
-
-  const chosen = complete.length
-    ? complete[0]
-    : candidates.slice().sort((a,b)=>
-        b.designCoveragePct-a.designCoveragePct ||
-        a.count-b.count ||
-        a.geometryScore-b.geometryScore
-      )[0];
-
-  const optimized =
-    circleMode === "circle-rings"
-      ? optimizeCircleRingRadius(
-          chosen,
-          room,
-          coverage,
-          acousticContext
-        )
-      : chosen;
-
+  const chosen = candidates[0];
   return {
-    ...optimized,
-    requiredDesignCoveragePct:
-      optimized.requiredDesignCoveragePct ??
-      requiredCoveragePct,
-    clearanceM:recommendedWallClearanceMeters(
-      coverage,room
-    ),
-    isStructuredLattice:true,
-    score:0,
-    source:"circle-coverage"
+    ...chosen,
+    requiredDesignCoveragePct: null,
+    clearanceM: recommendedWallClearanceMeters(coverage, room),
+    isStructuredLattice: true,
+    score: 0,
+    source: "ssc-fixed-spacing",
+    radialScale: 1,
+    removedSymmetricCount: 0
   };
 }
 
@@ -3491,7 +3483,7 @@ function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
     method:
       room.shape === "rectangle"
         ? `Pevná mřížka ${coverage.columns} × ${coverage.rows}`
-        : "Pevná mřížka X/Y oříznutá tvarem místnosti",
+        : "Pevná SSC mřížka X/Y oříznutá tvarem místnosti",
     clearanceM,
     alignmentWeight: 3,
     acoustic: null,
@@ -4039,6 +4031,28 @@ function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, co
   };
 }
 
+// v0.129 – konzervativnější odhad mimo osu reproduktoru.
+// U nominálního úhlu pokrytí předpokládáme běžnou definici -6 dB na jeho hraně.
+// Bez kompletních polárních dat výrobce jde stále o návrhový model, ne o predikci měření.
+function calculateOffAxisAttenuationDb(horizontalDistanceFt, verticalDistanceFt, coverageAngleDeg) {
+  const coverage = Number(coverageAngleDeg);
+  if (!Number.isFinite(coverage) || coverage >= 179) return 0;
+
+  const halfAngleDeg = Math.max(5, Math.min(89, coverage / 2));
+  const angleDeg = Math.atan2(
+    Math.max(0, horizontalDistanceFt),
+    Math.max(0.01, Math.abs(verticalDistanceFt))
+  ) * 180 / Math.PI;
+
+  const edgeCos = Math.max(0.02, Math.cos(halfAngleDeg * Math.PI / 180));
+  // exponent zvolený tak, aby na hraně nominálního pokrytí vyšlo -6 dB
+  const exponent = Math.log(Math.pow(10, -6 / 20)) / Math.log(edgeCos);
+  const angleCos = Math.max(0.001, Math.cos(Math.min(89.9, angleDeg) * Math.PI / 180));
+  const attenuation = 20 * exponent * Math.log10(angleCos);
+
+  return Math.max(-30, Math.min(0, attenuation));
+}
+
 function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap}) {
   let totalIntensity = 0;
 
@@ -4046,15 +4060,22 @@ function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHe
     const dx = xFt - p.x;
     const dy = yFt - p.y;
     const dz = mountingHeightFt - listenerHeightFt;
+    const horizontalDistanceFt = Math.sqrt(dx * dx + dy * dy);
     const distanceFt = Math.max(
       MIN_LISTENER_DISTANCE_FT,
-      Math.sqrt(dx * dx + dy * dy + dz * dz)
+      Math.sqrt(horizontalDistanceFt * horizontalDistanceFt + dz * dz)
+    );
+    const offAxisAttenuationDb = calculateOffAxisAttenuationDb(
+      horizontalDistanceFt,
+      dz,
+      speaker.coverageAngle
     );
 
     const spl =
       speaker.sensitivity +
       10 * Math.log10(tap) -
-      20 * Math.log10(distanceFt / SPL_REFERENCE_DISTANCE_FT);
+      20 * Math.log10(distanceFt / SPL_REFERENCE_DISTANCE_FT) +
+      offAxisAttenuationDb;
 
     totalIntensity += Math.pow(10, spl / 10);
   }
@@ -4465,7 +4486,7 @@ function drawSectionView({
   const W = 900;
   const padX = 64;
   const padTop = 42;
-  const padBottom = 58;
+  const padBottom = 82;
 
   const axisLengthM = axis === "length" ? lengthM : widthM;
 
@@ -4529,7 +4550,7 @@ function drawSectionView({
   const floorCeilingLabels = `
     <text x="${ox - 10}" y="${ceilingY + 4}" text-anchor="end" fill="#9ba8b7" font-size="11">strop</text>
     <text x="${ox - 10}" y="${floorY}" text-anchor="end" fill="#9ba8b7" font-size="11">podlaha</text>
-    <text x="${W/2}" y="${floorY + 34}" text-anchor="middle" fill="#9ba8b7" font-size="12">
+    <text x="${W/2}" y="${floorY + 62}" text-anchor="middle" fill="#9ba8b7" font-size="12">
       ${axis === "length" ? "délka" : "šířka"} ${axisLengthM.toFixed(1)} m
     </text>
     <text x="${ox - 34}" y="${oy + roomH/2}" text-anchor="middle" fill="#9ba8b7" font-size="12"
@@ -4567,6 +4588,27 @@ function drawSectionView({
   const listenerCx = ox + listenerAxisM * pxPerMeter;
   const splLabel = Number.isFinite(listenerSpl) ? `${listenerSpl.toFixed(1)} dB` : "—";
 
+  // Kóta polohy posluchače od levé stěny řezu.
+  const listenerDimY = floorY + 20;
+  const listenerDimensionSvg = `
+    <g class="section-listener-dimension" pointer-events="none">
+      <line x1="${ox}" y1="${listenerDimY}" x2="${listenerCx}" y2="${listenerDimY}"
+        stroke="#9ba8b7" stroke-width="1.2"/>
+      <line x1="${ox}" y1="${listenerDimY - 6}" x2="${ox}" y2="${listenerDimY + 6}"
+        stroke="#9ba8b7" stroke-width="1.2"/>
+      <line x1="${listenerCx}" y1="${listenerDimY - 6}" x2="${listenerCx}" y2="${listenerDimY + 6}"
+        stroke="#9ba8b7" stroke-width="1.2"/>
+      <path d="M ${ox + 8} ${listenerDimY - 4} L ${ox} ${listenerDimY} L ${ox + 8} ${listenerDimY + 4}"
+        fill="none" stroke="#9ba8b7" stroke-width="1.2"/>
+      <path d="M ${listenerCx - 8} ${listenerDimY - 4} L ${listenerCx} ${listenerDimY} L ${listenerCx - 8} ${listenerDimY + 4}"
+        fill="none" stroke="#9ba8b7" stroke-width="1.2"/>
+      <rect x="${Math.max(ox + 4, (ox + listenerCx) / 2 - 47)}" y="${listenerDimY + 7}" width="94" height="18" rx="4"
+        fill="#111820" opacity="0.94"/>
+      <text x="${(ox + listenerCx) / 2}" y="${listenerDimY + 20}" text-anchor="middle"
+        fill="#d5dce5" font-size="11" font-weight="700">${listenerAxisM.toFixed(2)} m</text>
+    </g>
+  `;
+
   const listenerSvg = `
     <g class="section-listener" data-section-axis="${axis}" style="cursor: ew-resize">
       <rect x="${listenerCx - 31}" y="${earY - 44}" width="62" height="22" rx="6"
@@ -4580,7 +4622,7 @@ function drawSectionView({
     </g>
   `;
 
-  svg.innerHTML = defs + roomRect + `<g clip-path="url(#${clipId})">${coneSvg}</g>` + earLine + floorCeilingLabels + speakersSvg + listenerSvg;
+  svg.innerHTML = defs + roomRect + `<g clip-path="url(#${clipId})">${coneSvg}</g>` + earLine + floorCeilingLabels + speakersSvg + listenerDimensionSvg + listenerSvg;
 
   if (!appState.sectionGeom) appState.sectionGeom = {};
   appState.sectionGeom[svgId] = {
@@ -5433,35 +5475,10 @@ function calculate() {
     recommendedCount = sscLayout.placements.length;
     selectedCount = recommendedCount;
 
-    if (
-      room.shape === "rectangle" ||
-      placementOptimizationMode === "regular"
-    ) {
-      // Obdélník je vždy jen Pevná mřížka.
-      selectedLayout = sscLayout;
-    } else {
-      // Výřezy zatím necháváme v dosavadním režimu,
-      // ale počet už uživatel ručně nemění.
-      selectedLayout = selectBestLayoutForCount({
-        count:recommendedCount,
-        coverage,
-        room,
-        mode:placementOptimizationMode,
-        speaker,
-        targetSPL,
-        ambientNoise,
-        useCase,
-        voltage,
-        mountingHeightFt,
-        listenerHeightFt,
-        requestedTap:tapOverride,
-        quality:"full"
-      });
-
-      if (!selectedLayout?.placements?.length) {
-        selectedLayout = sscLayout;
-      }
-    }
+    // v0.130: pro všechny nekruhové tvary je geometrie pevná podle SSC.
+    // U L/U/výřezů se pouze vynechají body ležící mimo skutečnou plochu;
+    // žádný následný optimizer už body neposouvá ani nezvětšuje rozteče.
+    selectedLayout = sscLayout;
 
     countRecommendation = {
       recommendedCount,
