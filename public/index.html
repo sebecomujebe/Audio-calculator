@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.96" />
+  <link rel="stylesheet" href="style.css?v=0.97" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.96</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.97</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -211,10 +211,10 @@
       </aside>
 
       <section class="results-column">
-        <div class="panel">
+        <div class="panel result-overview-panel">
           <div class="section-heading result-heading">
             <div class="result-main">
-              <div class="eyebrow">VÝSLEDEK</div>
+              <div class="eyebrow">VÝSLEDEK NÁVRHU</div>
               <div class="result-title-row">
                 <h2 id="resultTitle">—</h2>
                 <span id="statusBadge" class="badge status-recommended">Doporučeno</span>
@@ -222,54 +222,112 @@
               <p id="recommendationReason" class="recommendation-reason">—</p>
             </div>
 
-            <div class="speaker-selector-wrap">
-              <label for="speakerOverride">Zvolit jiný model</label>
-              <select id="speakerOverride">
-                <option value="auto">Automaticky – doporučený model</option>
-              </select>
-            </div>
-
-            <div class="speaker-selector-wrap tap-selector-wrap">
-              <label for="tapOverride">TAP reproduktoru</label>
-              <select id="tapOverride">
-                <option value="auto">Automaticky</option>
-              </select>
+            <div class="result-controls">
+              <div class="speaker-selector-wrap">
+                <label for="speakerOverride">Jiný model</label>
+                <select id="speakerOverride">
+                  <option value="auto">Automaticky – doporučený model</option>
+                </select>
+              </div>
+              <div class="speaker-selector-wrap tap-selector-wrap">
+                <label for="tapOverride">TAP reproduktoru</label>
+                <select id="tapOverride">
+                  <option value="auto">Automaticky</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          <div class="stats-grid">
-            <div class="stat">
-              <span class="stat-label">Počet repro</span>
-              <strong id="speakerCount">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Rozmístění</span>
-              <strong id="layoutValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Tap</span>
-              <strong id="tapValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">SPL v místě posluchače</span>
-              <strong id="listenerSplValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Průměrné SPL v prostoru</span>
-              <strong id="averageSplValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Minimální SPL v prostoru</span>
-              <strong id="minimumSplValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Maximální SPL v prostoru</span>
-              <strong id="maximumSplValue">—</strong>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Rozdíl max–min</span>
-              <strong id="spreadSplValue">—</strong>
-            </div>
+          <div class="result-card-grid">
+            <section class="result-card result-card-primary">
+              <div class="result-card-title">Reproduktory</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Počet</span>
+                  <strong id="speakerCount">—</strong>
+                </div>
+                <div>
+                  <span>TAP / repro</span>
+                  <strong id="tapValue">—</strong>
+                </div>
+                <div>
+                  <span>Celkový výkon</span>
+                  <strong id="zonePowerSummaryValue">—</strong>
+                </div>
+              </div>
+            </section>
+
+            <section class="result-card">
+              <div class="result-card-title">Pokrytí a rozmístění</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Rozteč X × Y</span>
+                  <strong id="spacingSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Pokrytí 1 repro</span>
+                  <strong id="coverageSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Optimalizace</span>
+                  <strong id="optimizationSummaryValue">—</strong>
+                </div>
+              </div>
+              <div class="result-card-subline">
+                <span>Rozmístění</span>
+                <strong id="layoutValue">—</strong>
+              </div>
+            </section>
+
+            <section class="result-card spl-result-card">
+              <div class="result-card-title">SPL v prostoru</div>
+              <div class="result-metric-row result-metric-row-4">
+                <div>
+                  <span>Průměr</span>
+                  <strong id="averageSplValue">—</strong>
+                </div>
+                <div>
+                  <span>Minimum</span>
+                  <strong id="minimumSplValue">—</strong>
+                </div>
+                <div>
+                  <span>Maximum</span>
+                  <strong id="maximumSplValue">—</strong>
+                </div>
+                <div>
+                  <span>Max–min</span>
+                  <strong id="spreadSplValue">—</strong>
+                </div>
+              </div>
+              <div class="spl-coverage-row">
+                <div>
+                  <span>Plocha v toleranci ±3 dB</span>
+                  <strong id="splWithin3Value">—</strong>
+                </div>
+                <div>
+                  <span>Posluchač</span>
+                  <strong id="listenerSplValue">—</strong>
+                </div>
+              </div>
+            </section>
+
+            <section class="result-card project-result-card">
+              <div class="result-card-title">Projekt</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Plocha</span>
+                  <strong id="roomAreaSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Cílové SPL</span>
+                  <strong id="targetSplSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Okolní hluk</span>
+                  <strong id="ambientNoiseSummaryValue">—</strong>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 
@@ -312,7 +370,7 @@
               <span class="eyebrow">DETAILY NÁVRHU</span>
               <strong>Technické detaily</strong>
             </span>
-            <span class="technical-details-hint">Rozbalit</span>
+            <span class="technical-details-hint">Zobrazit</span>
           </summary>
           <div class="technical-details-content">
         <div class="panel section-view-panel">
@@ -463,6 +521,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.96"></script>
+  <script src="app.js?v=0.97"></script>
 </body>
 </html>

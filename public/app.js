@@ -1,4 +1,4 @@
-const APP_VERSION = "0.96";
+const APP_VERSION = "0.97";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -1323,6 +1323,13 @@ function calculateVisualHeatmap({
   });
 }
 
+function calculateSplToleranceCoverage(heatmap, toleranceDb = 3) {
+  if (!heatmap?.cells?.length) return 0;
+  const avg = heatmap.average;
+  const inside = heatmap.cells.filter(cell => Math.abs(cell.spl - avg) <= toleranceDb).length;
+  return inside / heatmap.cells.length * 100;
+}
+
 function prepareRenderedHeatmap(heatmap) {
   const maxRenderCells = 3500;
 
@@ -2581,6 +2588,8 @@ function calculate() {
   document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
   document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
   document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
+  const splWithin3Pct = calculateSplToleranceCoverage(heatmap, 3);
+  document.getElementById("splWithin3Value").textContent = `${splWithin3Pct.toFixed(0)} %`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("roomAreaValue").textContent = `${room.areaM2.toFixed(1)} m²`;
@@ -2616,6 +2625,39 @@ function calculate() {
   document.getElementById("recommendedTapValue").textContent = `${power.recommendedTap.toString().replace(".", ",")} W`;
   document.getElementById("selectedTapValue").textContent = `${selectedTap.toString().replace(".", ",")} W`;
   document.getElementById("zonePowerValue").textContent = `${adjustedPower.totalPower.toFixed(0)} W`;
+  const zonePowerSummary = document.getElementById("zonePowerSummaryValue");
+  if (zonePowerSummary) zonePowerSummary.textContent = `${adjustedPower.totalPower.toFixed(0)} W`;
+
+  const spacingSummary = document.getElementById("spacingSummaryValue");
+  if (spacingSummary) {
+    spacingSummary.textContent = `${(coverage.spacingX / FEET_PER_METER).toFixed(1).replace(".", ",")} × ${(coverage.spacingY / FEET_PER_METER).toFixed(1).replace(".", ",")} m`;
+  }
+
+  const coverageSummary = document.getElementById("coverageSummaryValue");
+  if (coverageSummary) {
+    coverageSummary.textContent = `Ø ${(coverage.coverageDiameter / FEET_PER_METER).toFixed(1).replace(".", ",")} m`;
+  }
+
+  const optimizationSummary = document.getElementById("optimizationSummaryValue");
+  if (optimizationSummary) {
+    optimizationSummary.textContent =
+      room.shape === "rectangle"
+        ? "Pravidelná mřížka"
+        : `${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`;
+    optimizationSummary.title =
+      room.shape === "rectangle"
+        ? "Pravidelná obdélníková mřížka"
+        : placementOptimization.method;
+  }
+
+  const roomAreaSummary = document.getElementById("roomAreaSummaryValue");
+  if (roomAreaSummary) roomAreaSummary.textContent = `${room.areaM2.toFixed(1).replace(".", ",")} m²`;
+
+  const targetSplSummary = document.getElementById("targetSplSummaryValue");
+  if (targetSplSummary) targetSplSummary.textContent = `${targetSPL.toFixed(0)} dB`;
+
+  const ambientNoiseSummary = document.getElementById("ambientNoiseSummaryValue");
+  if (ambientNoiseSummary) ambientNoiseSummary.textContent = `${ambientNoise.toFixed(0)} dB`;
   updateAmplifierUI(amplifierRecommendation);
   updatePriceSummary({ speaker, speakerCount: effectiveCoverage.count, amplifierRecommendation });
   document.getElementById("listenerPositionValue").textContent =
