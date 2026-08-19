@@ -1572,3 +1572,80 @@ input[type="number"]::-webkit-outer-spin-button {
     grid-template-columns: repeat(2, minmax(0,1fr));
   }
 }
+
+
+/* v0.101 – sjednocení audio tlačítek */
+.audio-control-button {
+  box-sizing: border-box;
+  height: 36px !important;
+  min-height: 36px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 13px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px !important;
+  font-size: 0.82rem !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+  white-space: nowrap;
+}
+
+.audio-file-label.audio-control-button {
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.04);
+  color: #e5ebf2;
+  cursor: pointer;
+  margin: 0;
+}
+
+.audio-play-button.audio-control-button {
+  margin: 0;
+}
+
+
+/* v0.102 – dva výřezy */
+.cutout-card {
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 10px;
+  padding: 11px;
+  background: rgba(255,255,255,.018);
+}
+
+.cutout-card + .second-cut-toggle,
+.second-cut-toggle + .cutout-card {
+  margin-top: 8px;
+}
+
+.cutout-title {
+  color: #dfe7ef;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 7px;
+}
+
+.second-cut-toggle {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 7px 2px;
+}
+
+.second-cut-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.second-cut-toggle > span {
+  margin: 0 !important;
+}
+
+.cutout-hint {
+  display: block;
+  margin-top: 8px;
+}

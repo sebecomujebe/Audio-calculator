@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.100" />
+  <link rel="stylesheet" href="style.css?v=0.102" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.100</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.102</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -24,7 +24,7 @@
           <span>Tvar místnosti</span>
           <select id="roomShape">
             <option value="rectangle" selected>Obdélník</option>
-            <option value="lshape">Místnost ve tvaru L</option>
+            <option value="lshape">Místnost s výřezem / výřezy</option>
             <option value="circle">Kruhová místnost</option>
           </select>
         </label>
@@ -85,31 +85,72 @@
         </div>
 
                 <div id="lShapeControls" class="shape-extra hidden">
-          <div class="compact-grid-2">
+          <div class="cutout-card">
+            <div class="cutout-title">Výřez 1</div>
+            <div class="compact-grid-2">
+              <label>
+                <span>Šířka výřezu</span>
+                <div class="field-with-unit">
+                  <input id="lCutWidth" type="number" min="0.2" step="0.1" value="3" />
+                  <span>m</span>
+                </div>
+              </label>
+              <label>
+                <span>Délka výřezu</span>
+                <div class="field-with-unit">
+                  <input id="lCutLength" type="number" min="0.2" step="0.1" value="3" />
+                  <span>m</span>
+                </div>
+              </label>
+            </div>
             <label>
-              <span>Šířka výřezu</span>
-              <div class="field-with-unit">
-                <input id="lCutWidth" type="number" min="0.2" step="0.1" value="3" />
-                <span>m</span>
-              </div>
-            </label>
-            <label>
-              <span>Délka výřezu</span>
-              <div class="field-with-unit">
-                <input id="lCutLength" type="number" min="0.2" step="0.1" value="3" />
-                <span>m</span>
-              </div>
+              <span>Umístění výřezu</span>
+              <select id="lCutCorner">
+                <option value="top-right" selected>Pravý horní roh</option>
+                <option value="top-left">Levý horní roh</option>
+                <option value="bottom-right">Pravý dolní roh</option>
+                <option value="bottom-left">Levý dolní roh</option>
+              </select>
             </label>
           </div>
-          <label>
-            <span>Umístění výřezu</span>
-            <select id="lCutCorner">
-              <option value="top-right" selected>Pravý horní roh</option>
-              <option value="top-left">Levý horní roh</option>
-              <option value="bottom-right">Pravý dolní roh</option>
-              <option value="bottom-left">Levý dolní roh</option>
-            </select>
+
+          <label class="second-cut-toggle">
+            <input id="secondCutEnabled" type="checkbox" />
+            <span>Přidat druhý výřez</span>
           </label>
+
+          <div id="secondCutControls" class="cutout-card hidden">
+            <div class="cutout-title">Výřez 2</div>
+            <div class="compact-grid-2">
+              <label>
+                <span>Šířka výřezu</span>
+                <div class="field-with-unit">
+                  <input id="lCutWidth2" type="number" min="0.2" step="0.1" value="3" />
+                  <span>m</span>
+                </div>
+              </label>
+              <label>
+                <span>Délka výřezu</span>
+                <div class="field-with-unit">
+                  <input id="lCutLength2" type="number" min="0.2" step="0.1" value="3" />
+                  <span>m</span>
+                </div>
+              </label>
+            </div>
+            <label>
+              <span>Umístění výřezu</span>
+              <select id="lCutCorner2">
+                <option value="top-left" selected>Levý horní roh</option>
+                <option value="top-right">Pravý horní roh</option>
+                <option value="bottom-right">Pravý dolní roh</option>
+                <option value="bottom-left">Levý dolní roh</option>
+              </select>
+            </label>
+          </div>
+
+          <span class="field-hint cutout-hint">
+            Dva výřezy lze kombinovat například pro T‑podobné a další členité půdorysy.
+          </span>
         </div>
 
         <div id="circleControls" class="shape-extra circle-dimensions-grid hidden">
@@ -297,9 +338,9 @@
                 Vyberte skladbu a spusťte ji. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
               </p>
               <div class="floor-audio-tools">
-                <label class="audio-file-label" for="audioFileInput">Vybrat skladbu</label>
+                <label class="audio-file-label audio-control-button" for="audioFileInput">Vybrat skladbu</label>
                 <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
-                <button id="audioPlayToggle" class="secondary-button small-button audio-play-button" type="button" disabled>Spustit</button>
+                <button id="audioPlayToggle" class="secondary-button small-button audio-play-button audio-control-button" type="button" disabled>Spustit</button>
                 <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
                 <audio id="spatialAudio" preload="metadata"></audio>
               </div>
@@ -533,6 +574,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.100"></script>
+  <script src="app.js?v=0.102"></script>
 </body>
 </html>

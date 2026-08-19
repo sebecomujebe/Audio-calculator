@@ -1,4 +1,4 @@
-const APP_VERSION = "0.100";
+const APP_VERSION = "0.102";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -460,6 +460,43 @@ function calculateCoverage({
 }
 
 
+function cutoutRectFromCorner(widthM, lengthM, corner, roomWidthM, roomLengthM) {
+  if (corner === "top-left") {
+    return {x1: 0, y1: 0, x2: widthM, y2: lengthM};
+  }
+  if (corner === "top-right") {
+    return {x1: roomWidthM - widthM, y1: 0, x2: roomWidthM, y2: lengthM};
+  }
+  if (corner === "bottom-left") {
+    return {x1: 0, y1: roomLengthM - lengthM, x2: widthM, y2: roomLengthM};
+  }
+  return {
+    x1: roomWidthM - widthM,
+    y1: roomLengthM - lengthM,
+    x2: roomWidthM,
+    y2: roomLengthM
+  };
+}
+
+function rectArea(rect) {
+  return Math.max(0, rect.x2 - rect.x1) * Math.max(0, rect.y2 - rect.y1);
+}
+
+function rectIntersectionArea(a, b) {
+  const w = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1));
+  const h = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1));
+  return w * h;
+}
+
+function pointInsideCutout(xM, yM, rect, eps = 1e-7) {
+  return (
+    xM >= rect.x1 - eps &&
+    xM <= rect.x2 + eps &&
+    yM >= rect.y1 - eps &&
+    yM <= rect.y2 + eps
+  );
+}
+
 function getRoomShapeConfig() {
   const shape = document.getElementById("roomShape")?.value || "rectangle";
 
@@ -478,16 +515,48 @@ function getRoomShapeConfig() {
   const lengthM = Math.max(1, numValue(document.getElementById("length")?.value, 5));
 
   if (shape === "lshape") {
-    const cutWidthM = Math.min(Math.max(0.2, numValue(document.getElementById("lCutWidth")?.value, 3)), Math.max(0.2, widthM - 0.2));
-    const cutLengthM = Math.min(Math.max(0.2, numValue(document.getElementById("lCutLength")?.value, 3)), Math.max(0.2, lengthM - 0.2));
+    const cutWidthM = Math.min(
+      Math.max(0.2, numValue(document.getElementById("lCutWidth")?.value, 3)),
+      Math.max(0.2, widthM - 0.2)
+    );
+    const cutLengthM = Math.min(
+      Math.max(0.2, numValue(document.getElementById("lCutLength")?.value, 3)),
+      Math.max(0.2, lengthM - 0.2)
+    );
+    const cutCorner = document.getElementById("lCutCorner")?.value || "top-right";
+
+    const cutouts = [
+      cutoutRectFromCorner(cutWidthM, cutLengthM, cutCorner, widthM, lengthM)
+    ];
+
+    const secondCutEnabled = Boolean(document.getElementById("secondCutEnabled")?.checked);
+    if (secondCutEnabled) {
+      const cutWidthM2 = Math.min(
+        Math.max(0.2, numValue(document.getElementById("lCutWidth2")?.value, 3)),
+        Math.max(0.2, widthM - 0.2)
+      );
+      const cutLengthM2 = Math.min(
+        Math.max(0.2, numValue(document.getElementById("lCutLength2")?.value, 3)),
+        Math.max(0.2, lengthM - 0.2)
+      );
+      const cutCorner2 = document.getElementById("lCutCorner2")?.value || "top-left";
+      cutouts.push(
+        cutoutRectFromCorner(cutWidthM2, cutLengthM2, cutCorner2, widthM, lengthM)
+      );
+    }
+
+    let removedAreaM2 = cutouts.reduce((sum, cut) => sum + rectArea(cut), 0);
+    if (cutouts.length === 2) {
+      removedAreaM2 -= rectIntersectionArea(cutouts[0], cutouts[1]);
+    }
+
     return {
       shape,
       widthM,
       lengthM,
-      cutWidthM,
-      cutLengthM,
-      cutCorner: document.getElementById("lCutCorner")?.value || "top-right",
-      areaM2: widthM * lengthM - cutWidthM * cutLengthM
+      cutouts,
+      secondCutEnabled,
+      areaM2: Math.max(0.04, widthM * lengthM - removedAreaM2)
     };
   }
 
@@ -504,21 +573,24 @@ function isPointInsideRoomMeters(xM, yM, room) {
     return dx * dx + dy * dy <= r * r + eps;
   }
 
-  if (xM < -eps || yM < -eps || xM > room.widthM + eps || yM > room.lengthM + eps) return false;
+  if (
+    xM < -eps ||
+    yM < -eps ||
+    xM > room.widthM + eps ||
+    yM > room.lengthM + eps
+  ) {
+    return false;
+  }
+
   if (room.shape !== "lshape") return true;
 
-  const cw = room.cutWidthM;
-  const cl = room.cutLengthM;
-
-  if (room.cutCorner === "top-left") return !(xM <= cw + eps && yM <= cl + eps);
-  if (room.cutCorner === "top-right") return !(xM >= room.widthM - cw - eps && yM <= cl + eps);
-  if (room.cutCorner === "bottom-left") return !(xM <= cw + eps && yM >= room.lengthM - cl - eps);
-  return !(xM >= room.widthM - cw - eps && yM >= room.lengthM - cl - eps);
+  return !(room.cutouts || []).some(cut => pointInsideCutout(xM, yM, cut, eps));
 }
 
 function clampPointToRoomMeters(xM, yM, room) {
   xM = Math.max(0, Math.min(room.widthM, xM));
   yM = Math.max(0, Math.min(room.lengthM, yM));
+
   if (isPointInsideRoomMeters(xM, yM, room)) return {xM, yM};
 
   if (room.shape === "circle") {
@@ -530,38 +602,45 @@ function clampPointToRoomMeters(xM, yM, room) {
     return {xM: r + dx / d * rr, yM: r + dy / d * rr};
   }
 
-  const candidates = [];
-  const cw = room.cutWidthM;
-  const cl = room.cutLengthM;
+  // Generic search for the nearest legal point. This supports one or two cutouts
+  // without special-casing individual corners.
+  const originX = xM;
+  const originY = yM;
+  const maxRadius = Math.hypot(room.widthM, room.lengthM);
+  const step = Math.max(0.02, Math.min(room.widthM, room.lengthM) / 250);
 
-  if (room.cutCorner === "top-right") {
-    candidates.push({xM: room.widthM - cw - 0.01, yM}, {xM, yM: cl + 0.01});
-  } else if (room.cutCorner === "top-left") {
-    candidates.push({xM: cw + 0.01, yM}, {xM, yM: cl + 0.01});
-  } else if (room.cutCorner === "bottom-right") {
-    candidates.push({xM: room.widthM - cw - 0.01, yM}, {xM, yM: room.lengthM - cl - 0.01});
-  } else {
-    candidates.push({xM: cw + 0.01, yM}, {xM, yM: room.lengthM - cl - 0.01});
+  for (let radius = step; radius <= maxRadius; radius += step) {
+    const angularSteps = 32;
+    for (let i = 0; i < angularSteps; i++) {
+      const angle = 2 * Math.PI * i / angularSteps;
+      const cx = Math.max(0, Math.min(room.widthM, originX + Math.cos(angle) * radius));
+      const cy = Math.max(0, Math.min(room.lengthM, originY + Math.sin(angle) * radius));
+      if (isPointInsideRoomMeters(cx, cy, room)) {
+        return {xM: cx, yM: cy};
+      }
+    }
   }
 
-  const valid = candidates.filter(p => isPointInsideRoomMeters(p.xM, p.yM, room));
-  valid.sort((a,b) => Math.hypot(a.xM-xM,a.yM-yM)-Math.hypot(b.xM-xM,b.yM-yM));
-  return valid[0] || {xM, yM};
+  return {xM: room.widthM / 2, yM: room.lengthM / 2};
 }
 
-function roomPolygonPoints(room, ox, oy, scale) {
+function roomPathData(room, ox, oy, scale) {
+  const x = ox;
+  const y = oy;
   const w = room.widthM * scale;
   const h = room.lengthM * scale;
-  const cw = room.cutWidthM * scale;
-  const cl = room.cutLengthM * scale;
 
-  if (room.cutCorner === "top-left")
-    return [[ox+cw,oy],[ox+w,oy],[ox+w,oy+h],[ox,oy+h],[ox,oy+cl],[ox+cw,oy+cl]];
-  if (room.cutCorner === "top-right")
-    return [[ox,oy],[ox+w-cw,oy],[ox+w-cw,oy+cl],[ox+w,oy+cl],[ox+w,oy+h],[ox,oy+h]];
-  if (room.cutCorner === "bottom-left")
-    return [[ox,oy],[ox+w,oy],[ox+w,oy+h],[ox+cw,oy+h],[ox+cw,oy+h-cl],[ox,oy+h-cl]];
-  return [[ox,oy],[ox+w,oy],[ox+w,oy+h-cl],[ox+w-cw,oy+h-cl],[ox+w-cw,oy+h],[ox,oy+h]];
+  let d = `M ${x} ${y} H ${x+w} V ${y+h} H ${x} Z`;
+
+  for (const cut of room.cutouts || []) {
+    const cx1 = ox + cut.x1 * scale;
+    const cy1 = oy + cut.y1 * scale;
+    const cx2 = ox + cut.x2 * scale;
+    const cy2 = oy + cut.y2 * scale;
+    d += ` M ${cx1} ${cy1} H ${cx2} V ${cy2} H ${cx1} Z`;
+  }
+
+  return d;
 }
 
 function roomSvgShape(room, ox, oy, scale) {
@@ -569,10 +648,11 @@ function roomSvgShape(room, ox, oy, scale) {
     const r = room.diameterM / 2 * scale;
     return `<circle cx="${ox+r}" cy="${oy+r}" r="${r}" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
   }
+
   if (room.shape === "lshape") {
-    const pts = roomPolygonPoints(room, ox, oy, scale).map(p => p.join(",")).join(" ");
-    return `<polygon points="${pts}" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
+    return `<path d="${roomPathData(room, ox, oy, scale)}" fill="#111820" fill-rule="evenodd" stroke="#7d8998" stroke-width="2"/>`;
   }
+
   return `<rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
 }
 
@@ -581,10 +661,11 @@ function roomClipPath(room, ox, oy, scale, clipId) {
     const r = room.diameterM / 2 * scale;
     return `<clipPath id="${clipId}"><circle cx="${ox+r}" cy="${oy+r}" r="${r}"/></clipPath>`;
   }
+
   if (room.shape === "lshape") {
-    const pts = roomPolygonPoints(room, ox, oy, scale).map(p => p.join(",")).join(" ");
-    return `<clipPath id="${clipId}"><polygon points="${pts}"/></clipPath>`;
+    return `<clipPath id="${clipId}"><path d="${roomPathData(room, ox, oy, scale)}" clip-rule="evenodd" fill-rule="evenodd"/></clipPath>`;
   }
+
   return `<clipPath id="${clipId}"><rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4"/></clipPath>`;
 }
 
@@ -594,10 +675,15 @@ function updateRoomShapeUi() {
   const heightRow = document.getElementById("heightRow");
   const ambientNoiseRow = document.getElementById("ambientNoiseRow");
   const circleControls = document.getElementById("circleControls");
+  const secondCutEnabled = Boolean(document.getElementById("secondCutEnabled")?.checked);
 
   document.getElementById("lengthRow")?.classList.toggle("hidden", shape === "circle");
   document.getElementById("widthRow")?.classList.toggle("hidden", shape === "circle");
   document.getElementById("lShapeControls")?.classList.toggle("hidden", shape !== "lshape");
+  document.getElementById("secondCutControls")?.classList.toggle(
+    "hidden",
+    shape !== "lshape" || !secondCutEnabled
+  );
   circleControls?.classList.toggle("hidden", shape !== "circle");
 
   // U kruhové místnosti držíme průměr a výšku vedle sebe.
@@ -642,20 +728,25 @@ function pointSegmentDistance(px, py, ax, ay, bx, by) {
 function getRoomBoundarySegments(room) {
   if (room.shape === "circle") return [];
 
-  if (room.shape === "lshape") {
-    const pts = roomPolygonPoints(room, 0, 0, 1);
-    return pts.map((p, i) => {
-      const q = pts[(i + 1) % pts.length];
-      return [p[0], p[1], q[0], q[1]];
-    });
-  }
-
-  return [
+  const segments = [
     [0, 0, room.widthM, 0],
     [room.widthM, 0, room.widthM, room.lengthM],
     [room.widthM, room.lengthM, 0, room.lengthM],
     [0, room.lengthM, 0, 0]
   ];
+
+  if (room.shape === "lshape") {
+    for (const cut of room.cutouts || []) {
+      segments.push(
+        [cut.x1, cut.y1, cut.x2, cut.y1],
+        [cut.x2, cut.y1, cut.x2, cut.y2],
+        [cut.x2, cut.y2, cut.x1, cut.y2],
+        [cut.x1, cut.y2, cut.x1, cut.y1]
+      );
+    }
+  }
+
+  return segments;
 }
 
 function distanceToRoomBoundaryMeters(xM, yM, room) {
@@ -2831,10 +2922,11 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
 
 
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","diameter","placementOptimization"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","secondCutEnabled","lCutWidth2","lCutLength2","lCutCorner2","diameter","placementOptimization"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
-      if (["length","width","lCutWidth","lCutLength","lCutCorner","diameter"].includes(id)) {
+      if (id === "secondCutEnabled") updateRoomShapeUi();
+      if (["length","width","lCutWidth","lCutLength","lCutCorner","secondCutEnabled","lCutWidth2","lCutLength2","lCutCorner2","diameter"].includes(id)) {
         appState.listenerXFt = null;
         appState.listenerYFt = null;
       }
