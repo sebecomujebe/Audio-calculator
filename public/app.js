@@ -1,4 +1,4 @@
-const APP_VERSION = "0.108";
+const APP_VERSION = "0.107";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -1677,8 +1677,7 @@ function quickAcousticMetrics({
   listenerHeightFt,
   speaker,
   tap,
-  targetSPL,
-  toleranceDb = 3
+  targetSPL
 }) {
   const samples = makeOptimizationSamples(room, 320);
   if (!samples.length || !placements.length) {
@@ -1711,7 +1710,7 @@ function quickAcousticMetrics({
 
   const average = 10 * Math.log10(linear / values.length);
   const tolerancePct =
-    values.filter(v => Math.abs(v - average) <= toleranceDb).length / values.length * 100;
+    values.filter(v => Math.abs(v - average) <= 3).length / values.length * 100;
 
   return {
     average,
@@ -1776,8 +1775,7 @@ function selectBestLayoutForCount(args) {
       listenerHeightFt,
       speaker,
       tap,
-      targetSPL,
-      toleranceDb: Number(coverage.expectedSPLVariation) || 3
+      targetSPL
     });
     const geometry = placementGeometryScore(
       candidate.placements,
@@ -3282,11 +3280,6 @@ function updateAmplifierUI(result) {
     `${result.amp.powerPerZone.toFixed(0)} W na výstup; ${dspText}, ${danteText}.`;
 }
 
-function updateSpeakerTypeUi() {
-  const type = document.getElementById("speakerType")?.value || "ceiling";
-  document.getElementById("pendantHeightRow")?.classList.toggle("hidden", type !== "pendant");
-}
-
 function calculate() {
   const room = getRoomShapeConfig();
   const lengthM = room.lengthM;
@@ -3531,12 +3524,8 @@ function calculate() {
   document.getElementById("minimumSplValue").textContent = `${heatmap.min.toFixed(1)} dB`;
   document.getElementById("maximumSplValue").textContent = `${heatmap.max.toFixed(1)} dB`;
   document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
-  const toleranceDb = Number(coverage.expectedSPLVariation) || 3;
-  const splTolerancePct = calculateSplToleranceCoverage(heatmap, toleranceDb);
-  document.getElementById("splToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
-  document.getElementById("splToleranceValue").textContent = `${splTolerancePct.toFixed(0)} %`;
-  document.getElementById("technicalToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
-  document.getElementById("technicalToleranceAreaValue").textContent = `${splTolerancePct.toFixed(0)} %`;
+  const splWithin3Pct = calculateSplToleranceCoverage(heatmap, 3);
+  document.getElementById("splWithin3Value").textContent = `${splWithin3Pct.toFixed(0)} %`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("roomAreaValue").textContent = `${room.areaM2.toFixed(1)} m²`;
@@ -3561,13 +3550,12 @@ function calculate() {
       ? ` • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
       : "";
 
-  const optimizationModeLabels = {
-    regular: "Pravidelné – striktní mřížka X/Y",
-    balanced: "Vyvážené – geometricky zarovnané",
-    coverage: "Nejlepší pokrytí – volná optimalizace"
-  };
   document.getElementById("placementOptimizationValue").textContent =
-    optimizationModeLabels[placementOptimizationMode] || placementOptimizationMode;
+    `${placementOptimization.method} • ${
+      speakerCountOverride === "auto"
+        ? `${recommendedCount} ks doporučeno`
+        : `${effectiveCoverage.count} ks ručně (doporučeno ${recommendedCount})`
+    }`;
   document.getElementById("listenerDistanceValue").textContent = formatMetersFromFeet(coverage.listenerDistance);
   document.getElementById("coverageDiameterValue").textContent = formatMetersFromFeet(coverage.coverageDiameter);
   document.getElementById("spacingXValue").textContent = formatMetersFromFeet(coverage.spacingX);
@@ -3586,52 +3574,40 @@ function calculate() {
       : "—";
     spacingSummary.title = "Medián vzdálenosti k nejbližšímu sousednímu reproduktoru.";
   }
+
+  const coverageSummary = document.getElementById("coverageSummaryValue");
+  if (coverageSummary) {
+    coverageSummary.textContent = `Ø ${(coverage.coverageDiameter / FEET_PER_METER).toFixed(1).replace(".", ",")} m`;
+  }
+
+  const optimizationSummary = document.getElementById("optimizationSummaryValue");
+  if (optimizationSummary) {
+    optimizationSummary.textContent = placementOptimization.method;
+    optimizationSummary.title =
+      speakerCountOverride === "auto"
+        ? `Automaticky doporučeno ${recommendedCount} ks`
+        : `Ruční počet ${effectiveCoverage.count} ks; automaticky doporučeno ${recommendedCount} ks`;
+  }
+
+  const roomAreaSummary = document.getElementById("roomAreaSummaryValue");
+  if (roomAreaSummary) roomAreaSummary.textContent = `${room.areaM2.toFixed(1).replace(".", ",")} m²`;
+
+  const targetSplSummary = document.getElementById("targetSplSummaryValue");
+  if (targetSplSummary) targetSplSummary.textContent = `${targetSPL.toFixed(0)} dB`;
+
+  const ambientNoiseSummary = document.getElementById("ambientNoiseSummaryValue");
+  if (ambientNoiseSummary) ambientNoiseSummary.textContent = `${ambientNoise.toFixed(0)} dB`;
   updateAmplifierUI(amplifierRecommendation);
   updatePriceSummary({ speaker, speakerCount: effectiveCoverage.count, amplifierRecommendation });
   document.getElementById("listenerPositionValue").textContent =
     `${(appState.listenerXFt / FEET_PER_METER).toFixed(1)} × ${(appState.listenerYFt / FEET_PER_METER).toFixed(1)} m`;
-  const roomShapeLabels = {
-    rectangle: "Obdélník",
-    lshape: "Místnost s výřezem / výřezy",
-    circle: "Kruh"
-  };
-  document.getElementById("technicalRoomShapeValue").textContent =
-    roomShapeLabels[room.shape] || room.shape;
-
-  document.getElementById("technicalRoomDimensionsValue").textContent =
-    room.shape === "circle"
-      ? `Ø ${room.diameterM.toFixed(1).replace(".", ",")} m × výška ${heightM.toFixed(1).replace(".", ",")} m`
-      : `${widthM.toFixed(1).replace(".", ",")} × ${lengthM.toFixed(1).replace(".", ",")} × ${heightM.toFixed(1).replace(".", ",")} m`;
-
-  document.getElementById("technicalAmbientNoiseValue").textContent =
-    `${ambientNoise.toFixed(0)} dB`;
-
-  document.getElementById("technicalInstallationValue").textContent =
-    speakerType === "pendant"
-      ? `Závěsné • výška reproduktoru ${(mountingHeightFt / FEET_PER_METER).toFixed(1).replace(".", ",")} m`
-      : `Stropní • výška reproduktoru ${heightM.toFixed(1).replace(".", ",")} m`;
-
-  document.getElementById("technicalRecommendedCountValue").textContent =
-    `${recommendedCount} ks`;
-
-  document.getElementById("technicalSelectedCountValue").textContent =
-    speakerCountOverride === "auto"
-      ? `${effectiveCoverage.count} ks – automaticky`
-      : `${effectiveCoverage.count} ks – ručně`;
-
-  document.getElementById("technicalWallClearanceValue").textContent =
-    `${placementOptimization.clearanceM.toFixed(2).replace(".", ",")} m`;
-
-  document.getElementById("technicalListenerHeightValue").textContent =
-    `${(listenerHeightFt / FEET_PER_METER).toFixed(2).replace(".", ",")} m`;
-
   updateSpeakerCoordinatesTable(placements);
 
   appState.latest = {
     lengthM, widthM, heightM, lengthFt, widthFt,
     placements, coverage: effectiveCoverage, room, placementOptimization, placementOptimizationMode, speaker, power: adjustedPower, heatmap, visualHeatmap, splStats,
     recommendedSpeaker, recommendedCoverage, amplifierRecommendation,
-    listenerHeightFt, mountingHeightFt, recommendedCount, selectedCount, toleranceDb, splTolerancePct
+    listenerHeightFt, mountingHeightFt, recommendedCount, selectedCount
   };
   updateSpatialAudioGain(listenerSPL);
 
@@ -3657,8 +3633,8 @@ populateSpeakerOverrideOptions();
 document.getElementById("speakerOverride").addEventListener("change", calculate);
 document.getElementById("speakerCountOverride")?.addEventListener("change", calculate);
 
-document.getElementById("speakerType").addEventListener("change", () => {
-  updateSpeakerTypeUi();
+document.getElementById("speakerType").addEventListener("change", (e) => {
+  document.getElementById("pendantHeightRow").classList.toggle("hidden", e.target.value !== "pendant");
 });
 
 
@@ -3868,7 +3844,6 @@ svg.addEventListener("pointercancel", () => {
 
 async function initializeApp() {
   updateRoomShapeUi();
-  updateSpeakerTypeUi();
   setDataSourceStatus("fallback", "Načítám živá data…");
   try {
     await loadLiveData();

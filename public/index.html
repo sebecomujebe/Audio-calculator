@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.108" />
+  <link rel="stylesheet" href="style.css?v=0.107" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.108</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.107</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -337,8 +337,8 @@
               <strong id="spreadSplValue">—</strong>
             </div>
             <div>
-              <span id="splToleranceLabel">Plocha v toleranci</span>
-              <strong id="splToleranceValue">—</strong>
+              <span>Plocha v toleranci ±3 dB</span>
+              <strong id="splWithin3Value">—</strong>
             </div>
             <div>
               <span>SPL v poloze posluchače</span>
@@ -437,63 +437,75 @@
             <span class="technical-details-hint">Zobrazit</span>
           </summary>
           <div class="technical-details-content">
-            <div class="technical-groups">
-
-              <section class="technical-group">
-                <h3>Místnost a zadání</h3>
-                <dl class="technical-detail-list">
-                  <div><dt>Tvar místnosti</dt><dd id="technicalRoomShapeValue">—</dd></div>
-                  <div><dt>Rozměry</dt><dd id="technicalRoomDimensionsValue">—</dd></div>
-                  <div><dt>Plocha</dt><dd id="roomAreaValue">—</dd></div>
-                  <div><dt>Okolní hluk</dt><dd id="technicalAmbientNoiseValue">—</dd></div>
-                  <div><dt id="targetSplLabel">Cílové SPL</dt><dd id="targetSplValue">—</dd></div>
-                  <div><dt>Typ instalace</dt><dd id="technicalInstallationValue">—</dd></div>
-                </dl>
-              </section>
-
-              <section class="technical-group">
-                <h3>Pokrytí</h3>
-                <dl class="technical-detail-list">
-                  <div><dt>Režim pokrytí</dt><dd id="coverageModeValue">—</dd></div>
-                  <div><dt id="technicalToleranceLabel">Plocha v toleranci</dt><dd id="technicalToleranceAreaValue">—</dd></div>
-                  <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
-                  <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
-                  <div><dt>Výchozí návrhová rozteč X</dt><dd id="spacingXValue">—</dd></div>
-                  <div><dt>Výchozí návrhová rozteč Y</dt><dd id="spacingYValue">—</dd></div>
-                </dl>
-              </section>
-
-              <section class="technical-group">
-                <h3>Rozmístění reproduktorů</h3>
-                <dl class="technical-detail-list">
-                  <div><dt>Režim optimalizace</dt><dd id="placementOptimizationValue">—</dd></div>
-                  <div><dt>Použitá geometrie</dt><dd id="layoutValue">—</dd></div>
-                  <div><dt>Doporučený počet</dt><dd id="technicalRecommendedCountValue">—</dd></div>
-                  <div><dt>Zvolený počet</dt><dd id="technicalSelectedCountValue">—</dd></div>
-                  <div><dt>Typická skutečná rozteč</dt><dd id="spacingSummaryValue">—</dd></div>
-                  <div><dt>Minimální návrhový odstup od stěny</dt><dd id="technicalWallClearanceValue">—</dd></div>
-                </dl>
-              </section>
-
-              <section class="technical-group">
-                <h3>Reproduktor a výkon</h3>
-                <dl class="technical-detail-list">
-                  <div><dt>Automaticky doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
-                  <div><dt>Doporučený TAP</dt><dd id="recommendedTapValue">—</dd></div>
-                  <div><dt>Zvolený TAP</dt><dd id="selectedTapValue">—</dd></div>
-                  <div><dt>Výkon reproduktorů celkem</dt><dd id="zonePowerValue">—</dd></div>
-                </dl>
-              </section>
-
-              <section class="technical-group">
-                <h3>Posluchač</h3>
-                <dl class="technical-detail-list">
-                  <div><dt>Pozice v půdorysu</dt><dd id="listenerPositionValue">—</dd></div>
-                  <div><dt>Výška uší posluchače</dt><dd id="technicalListenerHeightValue">—</dd></div>
-                </dl>
-              </section>
-
+            <div class="details-result-stack">
+              <section class="result-card">
+              <div class="result-card-title">Pokrytí a rozmístění</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Rozteč X × Y</span>
+                  <strong id="spacingSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Pokrytí 1 repro</span>
+                  <strong id="coverageSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Optimalizace</span>
+                  <strong id="optimizationSummaryValue">—</strong>
+                </div>
+              </div>
+              <div class="result-card-subline">
+                <span>Rozmístění</span>
+                <strong id="layoutValue">—</strong>
+              </div>
+            </section>
+              <section class="result-card project-result-card">
+              <div class="result-card-title">Projekt</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Plocha</span>
+                  <strong id="roomAreaSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Cílové SPL</span>
+                  <strong id="targetSplSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Okolní hluk</span>
+                  <strong id="ambientNoiseSummaryValue">—</strong>
+                </div>
+              </div>
+            </section>
             </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">TECHNICKÝ SOUHRN</div>
+              <h2>Parametry návrhu</h2>
+            </div>
+          </div>
+
+          <dl class="summary-list">
+            <div><dt>Doporučený model</dt><dd id="recommendedModelValue">—</dd></div>
+            <div><dt>Plocha místnosti</dt><dd id="roomAreaValue">—</dd></div>
+            <div class="summary-explained">
+              <dt id="targetSplLabel">Cílové SPL</dt>
+              <dd id="targetSplValue">75 dB</dd>
+            </div>
+            <div><dt>Režim pokrytí / očekávaná odchylka</dt><dd id="coverageModeValue">—</dd></div>
+            <div><dt>Optimalizace rozmístění</dt><dd id="placementOptimizationValue">—</dd></div>
+            <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
+            <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
+            <div><dt>Rozteč X</dt><dd id="spacingXValue">—</dd></div>
+            <div><dt>Rozteč Y</dt><dd id="spacingYValue">—</dd></div>
+            <div><dt>Doporučený TAP</dt><dd id="recommendedTapValue">—</dd></div>
+            <div><dt>Zvolený TAP</dt><dd id="selectedTapValue">—</dd></div>
+            <div><dt>Celkový příkon zóny</dt><dd id="zonePowerValue">—</dd></div>
+            <div><dt>Pozice posluchače</dt><dd id="listenerPositionValue">—</dd></div>
+          </dl>
+        </div>
+
           </div>
         </details>
 
@@ -590,6 +602,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.108"></script>
+  <script src="app.js?v=0.107"></script>
 </body>
 </html>
