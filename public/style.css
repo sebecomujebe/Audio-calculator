@@ -2212,3 +2212,10 @@ input[type="number"]::-webkit-outer-spin-button {
     text-align: left;
   }
 }
+
+
+/* v0.109 – cíl kvality automatického návrhu */
+#technicalToleranceGoalValue {
+  color: #cbd5df;
+  font-weight: 650;
+}

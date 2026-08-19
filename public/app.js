@@ -1,4 +1,4 @@
-const APP_VERSION = "0.108";
+const APP_VERSION = "0.109";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -932,12 +932,46 @@ function clampPointToRoomWithClearance(xM, yM, room, clearanceM) {
   return best || basic;
 }
 
+const OPTIMIZATION_SAMPLE_CACHE = new Map();
+const LAYOUT_CANDIDATE_CACHE = new Map();
+const COUNT_RECOMMENDATION_CACHE = new Map();
+
+function roomGeometryCacheKey(room) {
+  const cuts = (room.cutouts || []).map(c => [
+    c.side,
+    Number(c.x1).toFixed(3),
+    Number(c.y1).toFixed(3),
+    Number(c.x2).toFixed(3),
+    Number(c.y2).toFixed(3)
+  ].join(":")).join("|");
+
+  return [
+    room.shape,
+    Number(room.widthM).toFixed(3),
+    Number(room.lengthM).toFixed(3),
+    Number(room.diameterM || 0).toFixed(3),
+    cuts
+  ].join(";");
+}
+
+function cacheSetLimited(map, key, value, maxEntries = 80) {
+  if (map.size >= maxEntries && !map.has(key)) {
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
+  }
+  map.set(key, value);
+}
+
 function makeOptimizationSamples(room, maxPoints = 900) {
+  const cacheKey = `${roomGeometryCacheKey(room)};samples=${maxPoints}`;
+  const cached = OPTIMIZATION_SAMPLE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
   const aspect = Math.max(0.1, room.widthM / Math.max(0.1, room.lengthM));
-  let nx = Math.max(10, Math.round(Math.sqrt(maxPoints * aspect)));
-  let ny = Math.max(10, Math.round(maxPoints / nx));
-  nx = Math.min(nx, 80);
-  ny = Math.min(ny, 80);
+  let nx = Math.max(8, Math.round(Math.sqrt(maxPoints * aspect)));
+  let ny = Math.max(8, Math.round(maxPoints / nx));
+  nx = Math.min(nx, 70);
+  ny = Math.min(ny, 70);
 
   const samples = [];
   for (let iy = 0; iy < ny; iy++) {
@@ -949,6 +983,8 @@ function makeOptimizationSamples(room, maxPoints = 900) {
       }
     }
   }
+
+  cacheSetLimited(OPTIMIZATION_SAMPLE_CACHE, cacheKey, samples, 64);
   return samples;
 }
 
@@ -1334,27 +1370,55 @@ function rotatePlacementPoint(xM, yM, cxM, cyM, angleDeg) {
   };
 }
 
-function regularGridCandidatesForCount(count, room, clearanceM, angleDeg = 0, staggerRows = false) {
+function regularGridCandidatesForCount(
+  count,
+  room,
+  clearanceM,
+  angleDeg = 0,
+  staggerRows = false,
+  maxCandidates = 4
+) {
   if (count <= 0) return [];
 
-  const samples = makeOptimizationSamples(room, 520);
+  const samples = makeOptimizationSamples(room, 260);
   const centroid = roomSampleCentroid(room, samples);
   const aspect = Math.max(0.2, room.widthM / Math.max(0.2, room.lengthM));
   const approximateColumns = Math.max(1, Math.round(Math.sqrt(count * aspect)));
-  const candidates = [];
+  const ranked = [];
 
-  // Pro každý počet zkoušíme několik počtů řad/sloupců a několik fází mřížky.
-  for (let columns = Math.max(1, approximateColumns - 3); columns <= approximateColumns + 3; columns++) {
+  // U kruhu musí být pravidelná mřížka skutečně vystředěná.
+  // U ostatních půdorysů dovolíme jen malé globální posuny.
+  const phasePairs = room.shape === "circle"
+    ? [[0,0]]
+    : [[0,0],[-0.12,0],[0.12,0],[0,-0.12],[0,0.12]];
+
+  // Širší rozsah okrajového odsazení je důležitý hlavně pro kruh:
+  // mřížka se může stáhnout směrem ke středu místo nalepení k obvodu.
+  const marginFactors = room.shape === "circle"
+    ? [0.58, 0.76, 0.96, 1.16]
+    : [0.52, 0.70, 0.88];
+
+  for (
+    let columns = Math.max(1, approximateColumns - 2);
+    columns <= approximateColumns + 2;
+    columns++
+  ) {
     const rows = Math.max(1, Math.ceil(count / columns));
 
-    for (const marginFactor of [0.46, 0.56, 0.66]) {
+    for (const marginFactor of marginFactors) {
       const marginX = Math.max(
         clearanceM,
-        Math.min(room.widthM * 0.22, room.widthM / Math.max(2, columns + 1) * marginFactor)
+        Math.min(
+          room.widthM * (room.shape === "circle" ? 0.34 : 0.27),
+          room.widthM / Math.max(2, columns + 1) * marginFactor
+        )
       );
       const marginY = Math.max(
         clearanceM,
-        Math.min(room.lengthM * 0.22, room.lengthM / Math.max(2, rows + 1) * marginFactor)
+        Math.min(
+          room.lengthM * (room.shape === "circle" ? 0.34 : 0.27),
+          room.lengthM / Math.max(2, rows + 1) * marginFactor
+        )
       );
 
       const usableW = Math.max(0.05, room.widthM - 2 * marginX);
@@ -1362,46 +1426,66 @@ function regularGridCandidatesForCount(count, room, clearanceM, angleDeg = 0, st
       const stepX = columns > 1 ? usableW / (columns - 1) : 0;
       const stepY = rows > 1 ? usableH / (rows - 1) : 0;
 
-      for (const phaseX of [-0.18, 0, 0.18]) {
-        for (const phaseY of [-0.18, 0, 0.18]) {
-          let lattice = [];
+      for (const [phaseX, phaseY] of phasePairs) {
+        let lattice = [];
 
-          for (let row = 0; row < rows; row++) {
-            const rowShift = staggerRows && columns > 1 && row % 2 ? stepX * 0.5 : 0;
+        for (let row = 0; row < rows; row++) {
+          const rowShift = staggerRows && columns > 1 && row % 2 ? stepX * 0.5 : 0;
 
-            for (let col = 0; col < columns; col++) {
-              let xM = columns === 1
-                ? centroid.xM
-                : marginX + col * stepX + rowShift + phaseX * stepX;
-              let yM = rows === 1
-                ? centroid.yM
-                : marginY + row * stepY + phaseY * stepY;
+          for (let col = 0; col < columns; col++) {
+            let xM = columns === 1
+              ? centroid.xM
+              : centroid.xM - usableW / 2 + col * stepX + rowShift + phaseX * stepX;
+            let yM = rows === 1
+              ? centroid.yM
+              : centroid.yM - usableH / 2 + row * stepY + phaseY * stepY;
 
-              const rotated = rotatePlacementPoint(xM, yM, centroid.xM, centroid.yM, angleDeg);
-              xM = rotated.xM;
-              yM = rotated.yM;
+            const rotated = rotatePlacementPoint(
+              xM, yM, centroid.xM, centroid.yM, angleDeg
+            );
+            xM = rotated.xM;
+            yM = rotated.yM;
 
-              if (!isPointInsideRoomMeters(xM, yM, room)) continue;
-              if (distanceToRoomBoundaryMeters(xM, yM, room) < clearanceM * 0.82) continue;
+            if (!isPointInsideRoomMeters(xM, yM, room)) continue;
+            if (distanceToRoomBoundaryMeters(xM, yM, room) < clearanceM * 0.80) continue;
 
-              lattice.push({
-                x: xM * FEET_PER_METER,
-                y: yM * FEET_PER_METER
-              });
-            }
+            lattice.push({
+              x: xM * FEET_PER_METER,
+              y: yM * FEET_PER_METER
+            });
           }
-
-          lattice = dedupePlacementPoints(lattice);
-          if (lattice.length < count) continue;
-
-          const selected = chooseSpreadSubset(lattice, count, room, samples);
-          if (selected.length === count) candidates.push(selected);
         }
+
+        lattice = dedupePlacementPoints(lattice);
+        if (lattice.length < count) continue;
+
+        const selected = chooseSpreadSubset(lattice, count, room, samples);
+        if (selected.length !== count) continue;
+
+        const geometryScore = placementGeometryScore(
+          selected, room, samples, clearanceM
+        );
+        ranked.push({placements:selected, geometryScore});
       }
     }
   }
 
-  return candidates;
+  ranked.sort((a,b) => a.geometryScore - b.geometryScore);
+
+  const unique = [];
+  const keys = new Set();
+  for (const item of ranked) {
+    const key = item.placements
+      .map(p => `${(p.x/FEET_PER_METER).toFixed(2)},${(p.y/FEET_PER_METER).toFixed(2)}`)
+      .sort()
+      .join("|");
+    if (keys.has(key)) continue;
+    keys.add(key);
+    unique.push(item.placements);
+    if (unique.length >= maxCandidates) break;
+  }
+
+  return unique;
 }
 
 function adaptiveAlignedRowsCandidate(count, room, clearanceM, vertical = false) {
@@ -1570,56 +1654,94 @@ function freeCoverageSeed(count, room, clearanceM) {
   return chooseSpreadSubset(candidates, count, room, samples);
 }
 
-function buildLayoutCandidates(count, coverage, room, mode) {
+function buildLayoutCandidates(count, coverage, room, mode, quality = "full") {
   const clearanceM = recommendedWallClearanceMeters(coverage, room);
+  const cacheKey = [
+    roomGeometryCacheKey(room),
+    `count=${count}`,
+    `mode=${mode}`,
+    `quality=${quality}`,
+    `spacing=${Number(coverage.targetSpacing || 0).toFixed(3)}`,
+    `clearance=${clearanceM.toFixed(3)}`
+  ].join(";");
+
+  const cached = LAYOUT_CANDIDATE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
   const result = [];
-  const samples = makeOptimizationSamples(room, 520);
+  const samples = makeOptimizationSamples(room, quality === "coarse" ? 180 : 280);
 
   const add = (placements, method, alignmentWeight) => {
     if (!placements || placements.length !== count) return;
     const clean = dedupePlacementPoints(placements);
     if (clean.length !== count) return;
     result.push({
-      placements: clean,
+      placements:clean,
       method,
       alignmentWeight,
       clearanceM
     });
   };
 
-  // 1) Pravidelné = pouze pravoúhlá X/Y mřížka.
-  for (const candidate of regularGridCandidatesForCount(count, room, clearanceM, 0, false)) {
+  const perFamily = quality === "coarse" ? 2 : 4;
+
+  // PRAVIDELNÉ: striktní X/Y. U kruhu je mřížka vystředěná.
+  for (const candidate of regularGridCandidatesForCount(
+    count, room, clearanceM, 0, false, perFamily
+  )) {
     add(candidate, "Pravidelná mřížka X/Y", 3.0);
   }
 
   if (mode !== "regular") {
-    // 2) Vyvážené = geometricky čitelné rodiny. Vždy zůstává jasná
-    // osa/řada/mřížka, ale nemusí jít o stejné rozteče všech řad.
-    for (const candidate of regularGridCandidatesForCount(count, room, clearanceM, 0, true)) {
+    // VYVÁŽENÉ: geometricky čitelné varianty.
+    for (const candidate of regularGridCandidatesForCount(
+      count, room, clearanceM, 0, true, perFamily
+    )) {
       add(candidate, "Posunuté zarovnané řady", 2.5);
     }
-    for (const candidate of regularGridCandidatesForCount(count, room, clearanceM, 45, false)) {
+
+    for (const candidate of regularGridCandidatesForCount(
+      count, room, clearanceM, 45, false, quality === "coarse" ? 1 : 3
+    )) {
       add(candidate, "Mřížka otočená 45°", 2.4);
     }
-    for (const candidate of regularGridCandidatesForCount(count, room, clearanceM, -45, false)) {
-      add(candidate, "Mřížka otočená −45°", 2.4);
+
+    // -45° je u symetrických půdorysů prakticky ekvivalentní.
+    // V hrubé fázi jej vynecháme, v plné fázi ponecháme.
+    if (quality !== "coarse") {
+      for (const candidate of regularGridCandidatesForCount(
+        count, room, clearanceM, -45, false, 2
+      )) {
+        add(candidate, "Mřížka otočená −45°", 2.4);
+      }
     }
 
-    const horizontalRows = adaptiveAlignedRowsCandidate(count, room, clearanceM, false);
-    add(horizontalRows, "Dynamicky zarovnané řady", 2.7);
+    add(
+      adaptiveAlignedRowsCandidate(count, room, clearanceM, false),
+      "Dynamicky zarovnané řady",
+      2.7
+    );
 
-    const verticalRows = adaptiveAlignedRowsCandidate(count, room, clearanceM, true);
-    add(verticalRows, "Dynamicky zarovnané sloupce", 2.7);
+    if (quality !== "coarse") {
+      add(
+        adaptiveAlignedRowsCandidate(count, room, clearanceM, true),
+        "Dynamicky zarovnané sloupce",
+        2.7
+      );
+    }
 
     if (room.shape === "circle") {
-      add(concentricCircleCandidate(count, room, clearanceM), "Kruhově zarovnané rozmístění", 2.2);
+      add(
+        concentricCircleCandidate(count, room, clearanceM),
+        "Kruhově zarovnané rozmístění",
+        2.2
+      );
     }
   }
 
   if (mode === "coverage") {
-    // 3) Pokrytí = zarovnání není kritérium. Začínáme několika různými
-    // seedy a Lloydovou relaxací maximalizujeme rovnoměrnost.
-    const seedList = result.map(x => x.placements);
+    // Pro pokrytí stačí několik nejlepších různých seedů.
+    const seedList = result.slice(0, quality === "coarse" ? 3 : 6).map(x => x.placements);
     seedList.push(freeCoverageSeed(count, room, clearanceM));
 
     const uniqueSeeds = [];
@@ -1635,18 +1757,27 @@ function buildLayoutCandidates(count, coverage, room, mode) {
       uniqueSeeds.push(seed);
     }
 
+    const iterations = quality === "coarse" ? 5 : 8;
     for (const seed of uniqueSeeds) {
-      const free = relaxPlacements(seed, room, 10, 0.82, clearanceM * 0.70);
-      add(free, "Volná optimalizace pokrytí", 0);
+      add(
+        relaxPlacements(seed, room, iterations, 0.80, clearanceM * 0.70),
+        "Volná optimalizace pokrytí",
+        0
+      );
     }
   }
 
-  // Nouzový fallback. U regular/balanced se nejprve snažíme vytvořit
-  // hustší X/Y mřížku a z ní vybrat přesný počet.
   if (!result.length) {
     const dense = [];
-    const nx = Math.max(3, Math.ceil(Math.sqrt(count * room.widthM / Math.max(0.2,room.lengthM)) * 2.2));
-    const ny = Math.max(3, Math.ceil(Math.sqrt(count * room.lengthM / Math.max(0.2,room.widthM)) * 2.2));
+    const nx = Math.max(
+      3,
+      Math.ceil(Math.sqrt(count * room.widthM / Math.max(0.2,room.lengthM)) * 2.0)
+    );
+    const ny = Math.max(
+      3,
+      Math.ceil(Math.sqrt(count * room.lengthM / Math.max(0.2,room.widthM)) * 2.0)
+    );
+
     for (let iy=0; iy<ny; iy++) {
       const yM = room.lengthM * (iy + 0.5) / ny;
       for (let ix=0; ix<nx; ix++) {
@@ -1656,9 +1787,16 @@ function buildLayoutCandidates(count, coverage, room, mode) {
         dense.push({x:xM*FEET_PER_METER,y:yM*FEET_PER_METER});
       }
     }
+
     let fallback = chooseSpreadSubset(dense, count, room, samples);
     if (mode === "coverage" && fallback.length === count) {
-      fallback = relaxPlacements(fallback,room,10,0.82,clearanceM*0.70);
+      fallback = relaxPlacements(
+        fallback,
+        room,
+        quality === "coarse" ? 5 : 8,
+        0.80,
+        clearanceM*0.70
+      );
     }
     add(
       fallback,
@@ -1667,6 +1805,7 @@ function buildLayoutCandidates(count, coverage, room, mode) {
     );
   }
 
+  cacheSetLimited(LAYOUT_CANDIDATE_CACHE, cacheKey, result, 90);
   return result;
 }
 
@@ -1678,9 +1817,10 @@ function quickAcousticMetrics({
   speaker,
   tap,
   targetSPL,
-  toleranceDb = 3
+  toleranceDb = 3,
+  sampleCount = 220
 }) {
-  const samples = makeOptimizationSamples(room, 320);
+  const samples = makeOptimizationSamples(room, sampleCount);
   if (!samples.length || !placements.length) {
     return {
       average:0,min:0,max:0,spread:Infinity,tolerancePct:0,
@@ -1756,10 +1896,10 @@ function selectBestLayoutForCount(args) {
   const {
     count, coverage, room, mode, speaker, targetSPL,
     ambientNoise, useCase, voltage, mountingHeightFt,
-    listenerHeightFt, requestedTap = "auto"
+    listenerHeightFt, requestedTap = "auto", quality = "full"
   } = args;
 
-  const candidates = buildLayoutCandidates(count, coverage, room, mode);
+  const candidates = buildLayoutCandidates(count, coverage, room, mode, quality);
   if (!candidates.length) return null;
 
   const {tap} = getEvaluationTap({
@@ -1767,6 +1907,8 @@ function selectBestLayoutForCount(args) {
   });
 
   let best = null;
+  const toleranceDb = Number(coverage.expectedSPLVariation) || 3;
+  const sampleCount = quality === "coarse" ? 130 : 240;
 
   for (const candidate of candidates) {
     const acoustic = quickAcousticMetrics({
@@ -1777,41 +1919,42 @@ function selectBestLayoutForCount(args) {
       speaker,
       tap,
       targetSPL,
-      toleranceDb: Number(coverage.expectedSPLVariation) || 3
+      toleranceDb,
+      sampleCount
     });
+
     const geometry = placementGeometryScore(
       candidate.placements,
       room,
-      null,
+      makeOptimizationSamples(room, quality === "coarse" ? 150 : 260),
       candidate.clearanceM
     );
 
+    // Plocha ve zvolené toleranci je primární kritérium.
     let score;
     if (mode === "regular") {
-      // Geometrie je povinná, proto není alignmentWeight jen bonus.
       score =
-        acoustic.tolerancePct * 1.05 -
+        acoustic.tolerancePct * 1.55 -
         acoustic.spread * 1.15 -
         acoustic.targetDeficit * 5.0 -
-        acoustic.minTargetDeficit * 2.5 -
-        geometry * 1.7 +
-        candidate.alignmentWeight * 2.5;
+        acoustic.minTargetDeficit * 2.2 -
+        geometry * 1.55 +
+        candidate.alignmentWeight * 2.2;
     } else if (mode === "balanced") {
       score =
-        acoustic.tolerancePct * 1.15 -
-        acoustic.spread * 1.35 -
-        acoustic.targetDeficit * 5.2 -
-        acoustic.minTargetDeficit * 2.8 -
-        geometry * 1.35 +
-        candidate.alignmentWeight * 2.0;
+        acoustic.tolerancePct * 1.65 -
+        acoustic.spread * 1.30 -
+        acoustic.targetDeficit * 5.0 -
+        acoustic.minTargetDeficit * 2.4 -
+        geometry * 1.25 +
+        candidate.alignmentWeight * 1.8;
     } else {
-      // Pokrytí ignoruje vizuální zarovnání.
       score =
-        acoustic.tolerancePct * 1.35 -
-        acoustic.spread * 1.75 -
-        acoustic.targetDeficit * 6.0 -
-        acoustic.minTargetDeficit * 3.2 -
-        geometry * 0.65;
+        acoustic.tolerancePct * 1.85 -
+        acoustic.spread * 1.60 -
+        acoustic.targetDeficit * 5.5 -
+        acoustic.minTargetDeficit * 2.8 -
+        geometry * 0.55;
     }
 
     if (!best || score > best.score) {
@@ -1829,79 +1972,159 @@ function selectBestLayoutForCount(args) {
 
 function candidateCountsForRecommendation(coverage, room) {
   const spacingM = Math.max(0.25, coverage.targetSpacing / FEET_PER_METER);
-  const areaBased = Math.max(1, Math.ceil(room.areaM2 / Math.max(0.25, spacingM * spacingM)));
+  const areaBased = Math.max(
+    1,
+    Math.ceil(room.areaM2 / Math.max(0.25, spacingM * spacingM))
+  );
   const gridBased = Math.max(1, coverage.count);
-  const reference = Math.max(1, Math.round((areaBased * 0.65) + (gridBased * 0.35)));
+  const reference = Math.max(
+    1,
+    Math.round(areaBased * 0.68 + gridBased * 0.32)
+  );
 
-  const values = new Set();
+  // Začínáme níž než teoretický výpočet a stoupáme.
+  const lo = Math.max(1, Math.floor(reference * 0.48));
+  const hi = Math.max(
+    lo + 6,
+    Math.ceil(reference * 1.55) + 3
+  );
 
-  if (reference <= 24) {
-    const lo = Math.max(1, Math.floor(reference * 0.50));
-    const hi = Math.max(lo + 4, Math.ceil(reference * 1.45) + 2);
-    for (let n=lo; n<=hi; n++) values.add(n);
-  } else {
-    const lo = Math.max(1, Math.floor(reference * 0.62));
-    const hi = Math.ceil(reference * 1.28);
-    const step = Math.max(1, Math.ceil((hi - lo) / 13));
-    for (let n=lo; n<=hi; n+=step) values.add(n);
-    for (let n=Math.max(1,reference-4); n<=reference+5; n++) values.add(n);
-  }
+  // U běžných návrhů testujeme každý počet, aby "nejmenší" opravdu znamenal
+  // nejmenší. U velkých hal použijeme hrubší krok a později okolí zpřesníme.
+  const values = [];
+  const step = hi <= 32 ? 1 : Math.max(2, Math.ceil((hi - lo) / 14));
 
-  values.add(areaBased);
-  values.add(gridBased);
-  values.add(reference);
+  for (let n=lo; n<=hi; n+=step) values.push(n);
+  if (!values.includes(reference)) values.push(reference);
 
-  return [...values]
-    .filter(n => n > 0)
-    .sort((a,b) => a-b)
-    .slice(0, 22);
+  return [...new Set(values)].sort((a,b)=>a-b);
+}
+
+function recommendationCacheKey(args) {
+  return [
+    roomGeometryCacheKey(args.room),
+    `mode=${args.mode}`,
+    `speaker=${args.speaker?.model || ""}`,
+    `angle=${Number(args.speaker?.coverageAngle || 0).toFixed(2)}`,
+    `target=${Number(args.targetSPL || 0).toFixed(1)}`,
+    `ambient=${Number(args.ambientNoise || 0).toFixed(1)}`,
+    `use=${args.useCase}`,
+    `voltage=${args.voltage}`,
+    `mount=${Number(args.mountingHeightFt || 0).toFixed(2)}`,
+    `listener=${Number(args.listenerHeightFt || 0).toFixed(2)}`,
+    `tol=${Number(args.coverage?.expectedSPLVariation || 3).toFixed(1)}`,
+    `spacing=${Number(args.coverage?.targetSpacing || 0).toFixed(2)}`,
+    `tap=${args.requestedTap || "auto"}`
+  ].join(";");
+}
+
+function recommendationPasses(layout, targetSPL) {
+  if (!layout?.acoustic) return false;
+  return (
+    layout.acoustic.tolerancePct >= 95 &&
+    layout.acoustic.average >= targetSPL - 1.5 &&
+    layout.acoustic.min >= targetSPL - 7
+  );
 }
 
 function recommendSpeakerCountAndLayout(args) {
+  const cacheKey = recommendationCacheKey(args);
+  const cached = COUNT_RECOMMENDATION_CACHE.get(cacheKey);
+  if (cached) return cached;
+
   const counts = candidateCountsForRecommendation(args.coverage, args.room);
   const evaluated = [];
+  let coarseWinner = null;
+  let previousCount = null;
 
+  // Fáze 1: rychlé hledání od nejmenšího počtu směrem nahoru.
+  // Jakmile najdeme první variantu s >=95 % plochy ve zvolené toleranci,
+  // není důvod počítat všechny vyšší počty.
   for (const count of counts) {
-    const layout = selectBestLayoutForCount({...args, count});
-    if (layout) evaluated.push({count, ...layout});
+    const layout = selectBestLayoutForCount({
+      ...args,
+      count,
+      quality:"coarse"
+    });
+
+    if (!layout) continue;
+    evaluated.push({count, ...layout});
+
+    if (recommendationPasses(layout, args.targetSPL)) {
+      coarseWinner = {count, ...layout};
+      break;
+    }
+    previousCount = count;
   }
 
-  if (!evaluated.length) return null;
+  // U velkých projektů může být mezi hrubými kroky několik neotestovaných
+  // počtů. Projdeme jen interval těsně před prvním vyhovujícím počtem.
+  let refinementCounts = [];
+  if (coarseWinner && previousCount !== null && coarseWinner.count - previousCount > 1) {
+    for (let n=previousCount + 1; n<=coarseWinner.count; n++) {
+      refinementCounts.push(n);
+    }
+  } else if (coarseWinner) {
+    refinementCounts = [coarseWinner.count];
+  }
 
-  const bestTolerance = Math.max(...evaluated.map(x => x.acoustic.tolerancePct));
-  const mode = args.mode;
-
-  const toleranceFloor =
-    mode === "coverage"
-      ? Math.max(94, bestTolerance - 1.5)
-      : mode === "balanced"
-        ? Math.max(92, bestTolerance - 2.2)
-        : Math.max(88, bestTolerance - 3.0);
-
-  const acceptable = evaluated.filter(x =>
-    x.acoustic.tolerancePct >= toleranceFloor &&
-    x.acoustic.average >= args.targetSPL - 1.5 &&
-    x.acoustic.min >= args.targetSPL - 7
-  );
-
-  let chosen;
-  if (acceptable.length) {
-    // Primárně nejmenší počet; při stejném počtu lepší skóre.
-    chosen = acceptable
+  // Pokud hrubá fáze nic nenašla, zpřesníme několik nejlepších výsledků,
+  // ne celý rozsah.
+  if (!coarseWinner) {
+    const topCounts = evaluated
       .slice()
-      .sort((a,b) => a.count - b.count || b.score - a.score)[0];
-  } else {
-    // Pokud se požadované kvality nedá dosáhnout, vrátíme nejlepší
-    // reálně dosažitelnou variantu, ne slepě nejvyšší počet.
-    chosen = evaluated.slice().sort((a,b) => b.score - a.score)[0];
+      .sort((a,b) =>
+        b.acoustic.tolerancePct - a.acoustic.tolerancePct ||
+        b.score - a.score
+      )
+      .slice(0, 4)
+      .map(x => x.count);
+    refinementCounts = [...new Set(topCounts)].sort((a,b)=>a-b);
   }
 
-  return {
+  let chosen = null;
+  const refined = [];
+
+  for (const count of refinementCounts) {
+    const layout = selectBestLayoutForCount({
+      ...args,
+      count,
+      quality:"full"
+    });
+    if (!layout) continue;
+
+    const item = {count, ...layout};
+    refined.push(item);
+
+    if (recommendationPasses(layout, args.targetSPL)) {
+      chosen = item;
+      break;
+    }
+  }
+
+  if (!chosen) {
+    const pool = refined.length ? refined : evaluated;
+    if (!pool.length) return null;
+
+    // Není-li 95 % dosažitelných, prioritou je nejvyšší dosažená plocha
+    // v toleranci; až potom celkové skóre.
+    chosen = pool.slice().sort((a,b) =>
+      b.acoustic.tolerancePct - a.acoustic.tolerancePct ||
+      b.score - a.score ||
+      a.count - b.count
+    )[0];
+  }
+
+  const result = {
     recommendedCount:chosen.count,
     chosen,
-    evaluated,
-    toleranceFloor
+    evaluated:[...evaluated, ...refined],
+    toleranceFloor:95,
+    targetMet:recommendationPasses(chosen, args.targetSPL)
   };
+
+  cacheSetLimited(COUNT_RECOMMENDATION_CACHE, cacheKey, result, 48);
+  return result;
 }
 
 function populateSpeakerCountOverrideOptions(recommendedCount, currentValue = "auto") {
@@ -3536,7 +3759,10 @@ function calculate() {
   document.getElementById("splToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
   document.getElementById("splToleranceValue").textContent = `${splTolerancePct.toFixed(0)} %`;
   document.getElementById("technicalToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
-  document.getElementById("technicalToleranceAreaValue").textContent = `${splTolerancePct.toFixed(0)} %`;
+  document.getElementById("technicalToleranceAreaValue").textContent =
+    `${splTolerancePct.toFixed(0)} %${countRecommendation.targetMet ? "" : " • maximum nalezené"}`;
+  document.getElementById("technicalToleranceGoalValue").textContent =
+    `≥ 95 % plochy v ±${toleranceDb} dB`;
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("roomAreaValue").textContent = `${room.areaM2.toFixed(1)} m²`;
