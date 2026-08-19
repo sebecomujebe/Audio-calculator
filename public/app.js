@@ -1,4 +1,4 @@
-const APP_VERSION = "0.104";
+const APP_VERSION = "0.105";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -679,31 +679,38 @@ function roomClipPath(room, ox, oy, scale, clipId) {
 
 function updateRoomShapeUi() {
   const shape = document.getElementById("roomShape")?.value || "rectangle";
+
   const roomGrid = document.getElementById("roomDimensionsGrid");
+  const lengthRow = document.getElementById("lengthRow");
+  const widthRow = document.getElementById("widthRow");
   const heightRow = document.getElementById("heightRow");
   const ambientNoiseRow = document.getElementById("ambientNoiseRow");
+  const lShapeControls = document.getElementById("lShapeControls");
   const circleControls = document.getElementById("circleControls");
+  const secondCutControls = document.getElementById("secondCutControls");
   const secondCutEnabled = Boolean(document.getElementById("secondCutEnabled")?.checked);
 
-  document.getElementById("lengthRow")?.classList.toggle("hidden", shape === "circle");
-  document.getElementById("widthRow")?.classList.toggle("hidden", shape === "circle");
-  document.getElementById("lShapeControls")?.classList.toggle("hidden", shape !== "lshape");
-  document.getElementById("secondCutControls")?.classList.toggle(
-    "hidden",
-    shape !== "lshape" || !secondCutEnabled
-  );
-  circleControls?.classList.toggle("hidden", shape !== "circle");
+  const isCircle = shape === "circle";
+  const isCutoutRoom = shape === "lshape";
 
-  // U kruhové místnosti držíme průměr a výšku vedle sebe.
-  if (shape === "circle") {
+  lengthRow?.classList.toggle("hidden", isCircle);
+  widthRow?.classList.toggle("hidden", isCircle);
+  lShapeControls?.classList.toggle("hidden", !isCutoutRoom);
+  circleControls?.classList.toggle("hidden", !isCircle);
+  secondCutControls?.classList.toggle("hidden", !isCutoutRoom || !secondCutEnabled);
+
+  // Výška je vždy viditelná. U kruhu ji přesuneme vedle průměru,
+  // u ostatních tvarů zpět do základní mřížky.
+  if (isCircle) {
     if (heightRow && circleControls && heightRow.parentElement !== circleControls) {
       circleControls.appendChild(heightRow);
     }
-  } else if (heightRow && roomGrid && ambientNoiseRow && heightRow.parentElement !== roomGrid) {
-    roomGrid.insertBefore(heightRow, ambientNoiseRow);
+  } else {
+    if (heightRow && roomGrid && ambientNoiseRow && heightRow.parentElement !== roomGrid) {
+      roomGrid.insertBefore(heightRow, ambientNoiseRow);
+    }
   }
 }
-
 function calculatePlacements(coverage, room = null) {
   const points = [];
   for (let row = 0; row < coverage.rows; row++) {

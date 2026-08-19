@@ -1869,3 +1869,111 @@ input[type="number"]::-webkit-outer-spin-button {
     flex-direction: column;
   }
 }
+
+
+/* v0.105 – technické detaily pod sebou */
+.details-result-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.details-result-stack .result-card,
+.details-result-stack .project-result-card {
+  grid-column: auto !important;
+}
+
+/* Souřadnice: ve sbaleném stavu opravdu nic z tabulky nezobrazovat */
+.coordinates-details:not([open]) .coordinates-content {
+  display: none !important;
+}
+
+/* Kompaktnější parametry */
+@media (min-width: 980px) {
+  .compact-form-panel {
+    padding: 10px 12px !important;
+  }
+
+  .compact-form-panel h2 {
+    margin-bottom: 4px !important;
+  }
+
+  .compact-form-panel label {
+    margin-bottom: 1px !important;
+    row-gap: 0 !important;
+  }
+
+  .compact-form-panel > label:not(.second-cut-toggle),
+  .compact-form-panel #roomDimensionsGrid > label,
+  .compact-form-panel .compact-grid-2 > label,
+  .compact-form-panel .cutout-compact-grid > label,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) {
+    column-gap: 6px !important;
+    row-gap: 0 !important;
+    margin-bottom: 1px !important;
+  }
+
+  .compact-form-panel .grid-2,
+  .compact-form-panel .compact-grid-2,
+  .compact-form-panel .cutout-compact-grid,
+  .compact-form-panel .circle-dimensions-grid:not(.hidden) {
+    gap: 0 !important;
+  }
+
+  .compact-form-panel input,
+  .compact-form-panel select {
+    min-height: 30px !important;
+    height: 30px !important;
+    padding: 3px 6px !important;
+  }
+
+  .compact-form-panel .field-with-unit {
+    min-height: 30px !important;
+  }
+
+  .compact-form-panel .room-shape-row,
+  .compact-form-panel .placement-optimization-row,
+  .compact-form-panel .shape-extra {
+    margin-top: 1px !important;
+    margin-bottom: 1px !important;
+  }
+
+  .compact-form-panel .field-hint {
+    margin-top: 2px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .compact-form-panel .cutout-card {
+    padding: 5px 7px !important;
+  }
+
+  .compact-form-panel .cutout-title {
+    margin-bottom: 2px !important;
+  }
+
+  .compact-form-panel .second-cut-toggle {
+    min-height: 24px !important;
+    padding: 2px 1px !important;
+    margin: 1px 0 !important;
+  }
+
+  .compact-form-panel #calculateBtn {
+    margin-top: 3px !important;
+  }
+}
+
+/* Shape visibility must always win over compact-grid display rules */
+#lengthRow.hidden,
+#widthRow.hidden,
+#lShapeControls.hidden,
+#circleControls.hidden,
+#secondCutControls.hidden {
+  display: none !important;
+}
+
+#circleControls:not(.hidden) {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 0 !important;
+}
