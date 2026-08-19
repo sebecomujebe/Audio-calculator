@@ -1,4 +1,4 @@
-const APP_VERSION = "0.98";
+const APP_VERSION = "0.99";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -855,93 +855,112 @@ function generateCircularRingPlacements(count, room, clearanceM) {
   const r = room.diameterM / 2;
   const cx = r;
   const cy = r;
-  const usableR = Math.max(0, r - clearanceM);
+  const usableR = Math.max(0.2, r - clearanceM);
 
   if (count === 1) {
     return [{x: cx * FEET_PER_METER, y: cy * FEET_PER_METER}];
   }
 
-  // Small circular layouts must remain exactly symmetric around the room centre.
-  // 2–6 speakers form a regular polygon (4 speakers = a centred cross).
-  if (count >= 2 && count <= 6) {
-    const radius = usableR * 0.72;
-    const phase = count === 4 ? 0 : -Math.PI / 2;
-    return Array.from({length: count}, (_, i) => {
-      const angle = phase + 2 * Math.PI * i / count;
-      return {
-        x: (cx + radius * Math.cos(angle)) * FEET_PER_METER,
-        y: (cy + radius * Math.sin(angle)) * FEET_PER_METER
-      };
-    });
-  }
-
+  // Symmetric ring templates. We deliberately avoid free per-point placement.
+  // The pattern remains centered around the room center.
   const points = [];
-  let remaining = count;
 
-  // Centre + rings for larger layouts.
-  if (count >= 7) {
-    points.push({x: cx * FEET_PER_METER, y: cy * FEET_PER_METER});
-    remaining--;
-  }
-
-  const ringCount = Math.max(1, Math.ceil(Math.sqrt(remaining / 6)));
-  const capacities = [];
-  for (let ring = 1; ring <= ringCount; ring++) capacities.push(6 * ring);
-
-  let left = remaining;
-  for (let ring = 1; ring <= ringCount && left > 0; ring++) {
-    const capacity = capacities[ring - 1];
-    const laterCapacity = capacities.slice(ring).reduce((a,b) => a+b, 0);
-    let onRing = Math.min(capacity, Math.max(1, left - Math.max(0, laterCapacity - left)));
-    if (ring === ringCount) onRing = left;
-
-    const radius = usableR * ring / ringCount * 0.82;
-    const phase = ring % 2 === 0 ? Math.PI / Math.max(1, onRing) : 0;
-
-    for (let i = 0; i < onRing; i++) {
-      const angle = phase + 2 * Math.PI * i / onRing;
+  function addRing(n, radius, phase = -Math.PI / 2) {
+    for (let i = 0; i < n; i++) {
+      const angle = phase + 2 * Math.PI * i / n;
       points.push({
         x: (cx + radius * Math.cos(angle)) * FEET_PER_METER,
         y: (cy + radius * Math.sin(angle)) * FEET_PER_METER
       });
     }
-    left -= onRing;
   }
+
+  // Small counts: one perfectly centered regular polygon.
+  if (count <= 6) {
+    const radius = usableR * (count <= 2 ? 0.38 : count <= 4 ? 0.52 : 0.58);
+    addRing(count, radius);
+    return points;
+  }
+
+  // Medium counts: center + one ring if it creates a clean symmetric pattern.
+  if ([7, 9, 11, 13].includes(count)) {
+    points.push({x: cx * FEET_PER_METER, y: cy * FEET_PER_METER});
+    addRing(count - 1, usableR * 0.62);
+    return points;
+  }
+
+  // Two concentric symmetric rings. Inner/outer counts are chosen so both
+  // rings remain close to regular polygons and the overall centroid is exact.
+  let innerCount = Math.max(4, Math.round(count * 0.35));
+  let outerCount = count - innerCount;
+
+  // Avoid pathological tiny outer rings.
+  if (outerCount < innerCount) {
+    innerCount = Math.floor(count / 3);
+    outerCount = count - innerCount;
+  }
+
+  const innerRadius = usableR * 0.36;
+  const outerRadius = usableR * 0.72;
+
+  addRing(innerCount, innerRadius, -Math.PI / 2);
+  addRing(outerCount, outerRadius, -Math.PI / 2 + Math.PI / Math.max(1, outerCount));
 
   return points.slice(0, count);
 }
 
-function scaleCircularPatternRadius(placements, room, scaleFactor) {
+function enforceCircularSymmetry(placements, room) {
+  if (!placements?.length) return placements || [];
+
   const r = room.diameterM / 2;
   const cxFt = r * FEET_PER_METER;
   const cyFt = r * FEET_PER_METER;
-  return placements.map(p => ({
-    x: cxFt + (p.x - cxFt) * scaleFactor,
-    y: cyFt + (p.y - cyFt) * scaleFactor
-  }));
+
+  const meanX = placements.reduce((s,p) => s + p.x, 0) / placements.length;
+  const meanY = placements.reduce((s,p) => s + p.y, 0) / placements.length;
+  const dx = cxFt - meanX;
+  const dy = cyFt - meanY;
+
+  return placements.map(p => ({x: p.x + dx, y: p.y + dy}));
 }
 
-function optimizeSmallCircularSymmetry(regular, room, samples, clearanceM) {
-  let best = regular;
-  let bestScore = placementGeometryScore(regular, room, samples, clearanceM);
-  for (const factor of [0.72,0.80,0.88,0.94,1.00,1.06,1.12,1.18]) {
-    const candidate = scaleCircularPatternRadius(regular, room, factor);
-    const valid = candidate.every(p => {
-      const xM = p.x / FEET_PER_METER;
-      const yM = p.y / FEET_PER_METER;
-      return isPointInsideRoomMeters(xM, yM, room) &&
-        distanceToRoomBoundaryMeters(xM, yM, room) + 1e-6 >= clearanceM;
+function optimizeCircularRadius(pattern, room, clearanceM, samples) {
+  if (!pattern?.length) return pattern || [];
+
+  const r = room.diameterM / 2;
+  const cxFt = r * FEET_PER_METER;
+  const cyFt = r * FEET_PER_METER;
+  const maxScale = 1.16;
+  const minScale = 0.78;
+
+  let best = pattern;
+  let bestScore = placementGeometryScore(pattern, room, samples, clearanceM);
+
+  for (let scale = minScale; scale <= maxScale + 1e-9; scale += 0.04) {
+    const candidate = pattern.map(p => ({
+      x: cxFt + (p.x - cxFt) * scale,
+      y: cyFt + (p.y - cyFt) * scale
+    })).map(p => {
+      const clamped = clampPointToRoomWithClearance(
+        p.x / FEET_PER_METER,
+        p.y / FEET_PER_METER,
+        room,
+        clearanceM
+      );
+      return {x: clamped.xM * FEET_PER_METER, y: clamped.yM * FEET_PER_METER};
     });
-    if (!valid) continue;
-    const score = placementGeometryScore(candidate, room, samples, clearanceM);
+
+    const centered = enforceCircularSymmetry(candidate, room);
+    const score = placementGeometryScore(centered, room, samples, clearanceM);
+
     if (score < bestScore) {
-      best = candidate;
+      best = centered;
       bestScore = score;
     }
   }
-  return {placements: best, score: bestScore};
-}
 
+  return best;
+}
 function relaxPlacements(placements, room, iterations = 4, blend = 0.58, clearanceM = 0) {
   if (!placements?.length) return placements || [];
 
@@ -1022,95 +1041,74 @@ function optimizePlacementsForRoom(basePlacements, coverage, room, mode = "balan
   const samples = makeOptimizationSamples(room);
   const baseScore = placementGeometryScore(base, room, samples, clearanceM);
 
-  let regular;
+  // Circle uses its own symmetry-preserving optimizer.
   if (room.shape === "circle") {
-    regular = generateCircularRingPlacements(base.length, room, clearanceM);
-  } else {
-    regular = generateRegularLPlacements(base, coverage, room, clearanceM);
-  }
+    const regular = generateCircularRingPlacements(base.length, room, clearanceM);
+    const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
 
-  const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
-
-  // For 1–6 speakers in a circle, symmetry and centring are a hard constraint.
-  // Optimization may change only the common radius, never shift the pattern off-centre.
-  if (room.shape === "circle" && base.length <= 6) {
     if (mode === "regular") {
       return {
         placements: regular,
         optimized: false,
-        method: "Symetrické rozmístění vůči středu",
+        method: "Pravidelné centrované rozmístění",
         improvementPct: baseScore > 0 ? Math.max(0, (baseScore - regularScore) / baseScore * 100) : 0,
         clearanceM
       };
     }
 
-    const symmetricBest = optimizeSmallCircularSymmetry(regular, room, samples, clearanceM);
-    const target = mode === "balanced"
-      ? blendPlacements(regular, symmetricBest.placements, room, 0.35, clearanceM)
-      : symmetricBest.placements;
-    const targetScore = placementGeometryScore(target, room, samples, clearanceM);
+    const radiusOptimized = optimizeCircularRadius(regular, room, clearanceM, samples);
+    const optimizedScore = placementGeometryScore(radiusOptimized, room, samples, clearanceM);
+
+    if (mode === "balanced") {
+      // Balanced in a circle never breaks symmetry. It only adjusts ring radius.
+      return {
+        placements: radiusOptimized,
+        optimized: true,
+        method: "Vyvážené centrované rozmístění",
+        improvementPct: regularScore > 0 ? Math.max(0, (regularScore - optimizedScore) / regularScore * 100) : 0,
+        clearanceM
+      };
+    }
+
+    // Coverage mode may use a slightly broader radial search, but still
+    // preserves the centroid and the ring structure.
+    const coverageOptimized = optimizeCircularRadius(radiusOptimized, room, clearanceM * 0.85, samples);
+    const coverageScore = placementGeometryScore(coverageOptimized, room, samples, clearanceM * 0.85);
 
     return {
-      placements: target,
-      optimized: mode !== "regular",
-      method: mode === "balanced" ? "Vyvážené symetrické rozmístění" : "Optimalizované symetrické rozmístění",
-      improvementPct: regularScore > 0 ? Math.max(0, (regularScore - targetScore) / regularScore * 100) : 0,
+      placements: coverageOptimized,
+      optimized: true,
+      method: "Centrované rozmístění pro nejlepší pokrytí",
+      improvementPct: regularScore > 0 ? Math.max(0, (regularScore - coverageScore) / regularScore * 100) : 0,
       clearanceM
     };
   }
+
+  // L-shaped rooms keep the grid/alignment logic.
+  const regular = generateRegularLPlacements(base, coverage, room, clearanceM);
+  const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
 
   if (mode === "regular") {
     return {
       placements: regular,
       optimized: false,
-      method: room.shape === "circle" ? "Pravidelné radiální zarovnání" : "Pravidelné zarovnání L",
+      method: "Pravidelné zarovnání L",
       improvementPct: baseScore > 0 ? Math.max(0, (baseScore - regularScore) / baseScore * 100) : 0,
       clearanceM
     };
   }
 
-  // Coverage-first candidate.
-  let coverageStart = regular;
-  let coverageCandidate = relaxPlacements(coverageStart, room, 6, 0.60, clearanceM);
-  let coverageScore = placementGeometryScore(coverageCandidate, room, samples, clearanceM);
-
-  // For a circle also compare against a freer Vogel distribution.
-  if (room.shape === "circle") {
-    const count = base.length;
-    const r = room.diameterM / 2;
-    const cx = r;
-    const cy = r;
-    const usableR = Math.max(0, r - clearanceM) * 0.92;
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    const vogel = [];
-
-    for (let i = 0; i < count; i++) {
-      const rr = usableR * Math.sqrt((i + 0.45) / count);
-      const angle = i * goldenAngle;
-      vogel.push({
-        x: (cx + rr * Math.cos(angle)) * FEET_PER_METER,
-        y: (cy + rr * Math.sin(angle)) * FEET_PER_METER
-      });
-    }
-
-    const vogelOptimized = relaxPlacements(vogel, room, 5, 0.52, clearanceM);
-    const vogelScore = placementGeometryScore(vogelOptimized, room, samples, clearanceM);
-    if (vogelScore < coverageScore) {
-      coverageCandidate = vogelOptimized;
-      coverageScore = vogelScore;
-    }
-  }
+  const coverageCandidate = relaxPlacements(regular, room, 6, 0.60, clearanceM);
+  const coverageScore = placementGeometryScore(coverageCandidate, room, samples, clearanceM);
 
   if (mode === "balanced") {
-    // Keep most of the regular geometry. Only 35 % of the free optimization
-    // is allowed to influence the final coordinates.
     const balanced = blendPlacements(regular, coverageCandidate, room, 0.35, clearanceM);
     const balancedScore = placementGeometryScore(balanced, room, samples, clearanceM);
 
     return {
       placements: balanced,
       optimized: true,
-      method: room.shape === "circle" ? "Vyvážené radiální rozmístění" : "Vyvážené rozmístění L",
+      method: "Vyvážené rozmístění L",
       improvementPct: regularScore > 0 ? Math.max(0, (regularScore - balancedScore) / regularScore * 100) : 0,
       clearanceM
     };
@@ -1119,12 +1117,11 @@ function optimizePlacementsForRoom(basePlacements, coverage, room, mode = "balan
   return {
     placements: coverageCandidate,
     optimized: true,
-    method: room.shape === "circle" ? "Optimalizované pokrytí kruhu" : "Optimalizované pokrytí L",
+    method: "Optimalizované pokrytí L",
     improvementPct: regularScore > 0 ? Math.max(0, (regularScore - coverageScore) / regularScore * 100) : 0,
     clearanceM
   };
 }
-
 function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, coverage) {
   const headroom = HEADROOM_BY_APPLICATION[useCase] || 10;
   const distanceLoss = 20 * Math.log10(coverage.listenerDistance / SPL_REFERENCE_DISTANCE_FT);
@@ -2349,14 +2346,13 @@ function updateSpeakerCoordinatesTable(placements) {
   }
 
   body.innerHTML = placements.map((p, index) => `
-    <tr data-speaker-index="${index}">
+    <tr data-speaker-index="${index}" class="${index >= 3 ? "coordinate-extra-row" : ""}">
       <td><strong>${index + 1}</strong></td>
       <td>${formatCoordinateMeters(p.x)}</td>
       <td>${formatCoordinateMeters(p.y)}</td>
     </tr>
   `).join("");
 }
-
 function getSpeakerCoordinatesText() {
   const placements = appState.latest?.placements || [];
   if (!placements.length) return "";

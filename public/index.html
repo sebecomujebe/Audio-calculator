@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.98" />
+  <link rel="stylesheet" href="style.css?v=0.99" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.98</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.99</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -212,10 +212,9 @@
 
       <section class="results-column">
         <div class="panel result-overview-panel">
-          <div class="section-heading result-heading">
-            <div class="result-main">
-              <div id="speakerProductImageSlot" class="product-image-slot" data-product-image-slot="speaker" hidden></div>
-              <div class="eyebrow">VÝSLEDEK NÁVRHU</div>
+          <div class="speaker-result-header">
+            <div>
+              <div class="eyebrow">REPRODUKTORY</div>
               <div class="result-title-row">
                 <h2 id="resultTitle">—</h2>
                 <span id="statusBadge" class="badge status-recommended">Doporučeno</span>
@@ -231,7 +230,7 @@
                 </select>
               </div>
               <div class="speaker-selector-wrap tap-selector-wrap">
-                <label for="tapOverride">TAP reproduktoru</label>
+                <label for="tapOverride">Výkonový odbočkový stupeň (TAP)</label>
                 <select id="tapOverride">
                   <option value="auto">Automaticky</option>
                 </select>
@@ -239,57 +238,22 @@
             </div>
           </div>
 
-          <div class="result-card-grid">
-            <section class="result-card result-card-primary">
-              <div class="result-card-title">Reproduktory</div>
-              <div class="result-metric-row">
-                <div>
-                  <span>Počet</span>
-                  <strong id="speakerCount">—</strong>
-                </div>
-                <div>
-                  <span>TAP / repro</span>
-                  <strong id="tapValue">—</strong>
-                </div>
-                <div>
-                  <span>Celkový výkon</span>
-                  <strong id="zonePowerSummaryValue">—</strong>
-                </div>
-              </div>
-            </section>
-
-            <section class="result-card spl-result-card">
-              <div class="result-card-title">SPL v prostoru</div>
-              <div class="result-metric-row result-metric-row-4">
-                <div>
-                  <span>Průměr</span>
-                  <strong id="averageSplValue">—</strong>
-                </div>
-                <div>
-                  <span>Minimum</span>
-                  <strong id="minimumSplValue">—</strong>
-                </div>
-                <div>
-                  <span>Maximum</span>
-                  <strong id="maximumSplValue">—</strong>
-                </div>
-                <div>
-                  <span>Max–min</span>
-                  <strong id="spreadSplValue">—</strong>
-                </div>
-              </div>
-              <div class="spl-coverage-row">
-                <div>
-                  <span>Plocha v toleranci ±3 dB</span>
-                  <strong id="splWithin3Value">—</strong>
-                </div>
-                <div>
-                  <span>Posluchač</span>
-                  <strong id="listenerSplValue">—</strong>
-                </div>
-              </div>
-            </section>
+          <div class="speaker-result-summary">
+            <div class="speaker-metric">
+              <span>Počet reproduktorů</span>
+              <strong id="speakerCount">—</strong>
+            </div>
+            <div class="speaker-metric">
+              <span>Výkon nastavený na jednom reproduktoru (TAP)</span>
+              <strong id="tapValue">—</strong>
+            </div>
+            <div class="speaker-metric">
+              <span>Celková zátěž reproduktorové linky</span>
+              <strong id="zonePowerSummaryValue">—</strong>
+            </div>
           </div>
+
+          <div id="speakerProductImageSlot" class="product-image-slot" data-product-image-slot="speaker" hidden></div>
         </div>
 
         <div class="panel floor-panel">
@@ -305,7 +269,7 @@
               <div class="floor-audio-tools">
                 <label class="audio-file-label" for="audioFileInput">Vybrat skladbu</label>
                 <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
-                <button id="audioPlayToggle" class="secondary-button small-button" type="button" disabled>Spustit</button>
+                <button id="audioPlayToggle" class="secondary-button small-button audio-play-button" type="button" disabled>Spustit</button>
                 <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
                 <audio id="spatialAudio" preload="metadata"></audio>
               </div>
@@ -335,7 +299,7 @@
         </div>
 
 
-        <div class="section-views-grid">
+        <div class="section-views-stack">
           <div class="panel section-view-panel">
           <div class="section-heading result-heading">
             <div>
@@ -446,40 +410,44 @@
           </div>
         </details>
 
-        <div class="panel speaker-coordinates-panel">
-          <div class="section-heading">
+        <details class="panel speaker-coordinates-panel coordinates-details">
+          <summary class="coordinates-summary">
             <div>
               <div class="eyebrow">MONTÁŽNÍ SOUŘADNICE</div>
               <h2>Souřadnice reproduktorů</h2>
+              <p class="coordinates-preview-note">Zobrazeny první 3 reproduktory. Rozbalením zobrazíte všechny souřadnice.</p>
             </div>
+            <span class="coordinates-toggle-button">Zobrazit vše</span>
+          </summary>
+
+          <div class="coordinates-content">
+            <p class="coordinates-note">
+              Souřadnice jsou měřeny ke středu reproduktoru od levého horního rohu obálky půdorysu.
+            </p>
+
+            <div class="coordinates-table-wrap">
+              <table class="coordinates-table">
+                <thead>
+                  <tr>
+                    <th>Repro</th>
+                    <th>X od levého okraje</th>
+                    <th>Y od horního okraje</th>
+                  </tr>
+                </thead>
+                <tbody id="speakerCoordinatesBody">
+                  <tr><td colspan="3">—</td></tr>
+                </tbody>
+              </table>
+            </div>
+
             <button id="copySpeakerCoordinates" type="button" class="secondary-button small-button">Kopírovat souřadnice</button>
           </div>
-
-          <p class="coordinates-note">
-            Souřadnice jsou měřeny ke středu reproduktoru od levého horního rohu obálky půdorysu.
-          </p>
-
-          <div class="coordinates-table-wrap">
-            <table class="coordinates-table">
-              <thead>
-                <tr>
-                  <th>Repro</th>
-                  <th>X od levého okraje</th>
-                  <th>Y od horního okraje</th>
-                </tr>
-              </thead>
-              <tbody id="speakerCoordinatesBody">
-                <tr><td colspan="3">—</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </details>
 
         <div class="panel amplifier-panel">
           <div class="section-heading">
             <div>
-              <div class="eyebrow">ZESILOVAČ</div>
-              <h2>Doporučený zesilovač</h2>
+              <div class="eyebrow">DOPORUČENÝ ZESILOVAČ</div>
             </div>
           </div>
           <div class="amp-result">
@@ -497,8 +465,7 @@
         <div class="panel price-summary-panel">
           <div class="section-heading">
             <div>
-              <div class="eyebrow">CENA NÁVRHU</div>
-              <h2>Cenové shrnutí</h2>
+              <div class="eyebrow">CENA PRODUKTŮ</div>
             </div>
             <span id="priceDataStatus" class="price-status">Cenový feed zatím není připojen</span>
           </div>
@@ -536,6 +503,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.98"></script>
+  <script src="app.js?v=0.99"></script>
 </body>
 </html>

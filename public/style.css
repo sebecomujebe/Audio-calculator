@@ -1352,3 +1352,172 @@ input[type="number"]::-webkit-outer-spin-button {
     width: auto;
   }
 }
+
+
+/* v0.99 – kompaktnější výsledky a stabilnější kruhové návrhy */
+
+.speaker-result-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.speaker-result-header .recommendation-reason {
+  max-width: 760px;
+  margin-top: 8px;
+}
+
+.speaker-result-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.speaker-metric {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  padding: 14px;
+}
+
+.speaker-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-bottom: 7px;
+}
+
+.speaker-metric strong {
+  display: block;
+  font-size: 20px;
+}
+
+/* Audio – malé tlačítko vedle výběru souboru */
+.floor-audio-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.audio-file-label,
+.audio-play-button {
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 auto;
+}
+
+.audio-play-button {
+  padding-inline: 12px !important;
+}
+
+/* Boční a čelní pohled větší, pod sebou */
+.section-views-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.section-views-stack .section-view-panel {
+  width: 100%;
+}
+
+/* Souřadnice – po sbalení viditelné jen první 3 řádky */
+.coordinates-details {
+  padding: 0;
+  overflow: hidden;
+}
+
+.coordinates-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  cursor: pointer;
+}
+
+.coordinates-summary::-webkit-details-marker {
+  display: none;
+}
+
+.coordinates-preview-note {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.coordinates-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 104px;
+  height: 36px;
+  padding: 0 13px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 9px;
+  background: rgba(255,255,255,.04);
+  color: #e5ebf2;
+  font-size: .82rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.coordinates-details[open] .coordinates-toggle-button {
+  font-size: 0;
+}
+.coordinates-details[open] .coordinates-toggle-button::after {
+  content: "Skrýt";
+  font-size: .82rem;
+}
+
+.coordinates-content {
+  padding: 0 22px 18px;
+}
+
+/* Details collapsed preview: show first 3 coordinates before open */
+.coordinates-details:not([open]) .coordinates-content {
+  display: block;
+  padding-top: 0;
+}
+
+.coordinates-details:not([open]) .coordinates-note,
+.coordinates-details:not([open]) #copySpeakerCoordinates,
+.coordinates-details:not([open]) .coordinates-table thead,
+.coordinates-details:not([open]) .coordinate-extra-row {
+  display: none;
+}
+
+.coordinates-details:not([open]) .coordinates-table-wrap {
+  margin-top: 0;
+}
+
+.coordinates-details:not([open]) .coordinates-table td {
+  padding-block: 6px;
+}
+
+/* Jednodušší nadpisy zesilovače a cen */
+.amplifier-panel .eyebrow,
+.price-summary-panel .eyebrow {
+  font-size: 15px;
+}
+
+/* Prepared image slots can later be made visible without changing layout logic */
+.product-image-slot[data-product-image-slot] {
+  transition: opacity .15s ease;
+}
+
+@media (max-width: 900px) {
+  .speaker-result-header {
+    flex-direction: column;
+  }
+
+  .speaker-result-summary {
+    grid-template-columns: 1fr;
+  }
+}
