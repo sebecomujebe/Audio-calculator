@@ -1977,3 +1977,105 @@ input[type="number"]::-webkit-outer-spin-button {
   grid-template-columns: 1fr !important;
   gap: 0 !important;
 }
+
+
+/* v0.106 – spolehlivé skrývání rozměrů podle tvaru + ještě kompaktnější panel */
+
+/* Musí být specifičtější než desktopové pravidlo, které z labelů dělá grid. */
+.compact-form-panel #roomDimensionsGrid > #lengthRow.hidden,
+.compact-form-panel #roomDimensionsGrid > #widthRow.hidden,
+.compact-form-panel #lShapeControls.hidden,
+.compact-form-panel #circleControls.hidden,
+.compact-form-panel #secondCutControls.hidden {
+  display: none !important;
+}
+
+@media (min-width: 980px) {
+  /* Celý panel bez zbytečných vertikálních mezer. */
+  .compact-form-panel {
+    padding: 9px 12px !important;
+  }
+
+  .compact-form-panel h2 {
+    margin: 0 0 3px !important;
+    line-height: 1.15 !important;
+  }
+
+  .compact-form-panel > label:not(.second-cut-toggle),
+  .compact-form-panel #roomDimensionsGrid > label,
+  .compact-form-panel .compact-grid-2 > label,
+  .compact-form-panel .cutout-compact-grid > label,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) {
+    min-height: 27px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    row-gap: 0 !important;
+    column-gap: 6px !important;
+  }
+
+  .compact-form-panel > label:not(.second-cut-toggle) > span:first-child,
+  .compact-form-panel #roomDimensionsGrid > label > span:first-child,
+  .compact-form-panel .compact-grid-2 > label > span:first-child,
+  .compact-form-panel .cutout-compact-grid > label > span:first-child,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) > span:first-child {
+    line-height: 1.05 !important;
+    margin: 0 !important;
+  }
+
+  .compact-form-panel input,
+  .compact-form-panel select {
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 2px 6px !important;
+    line-height: 1 !important;
+  }
+
+  .compact-form-panel .field-with-unit {
+    min-height: 28px !important;
+    height: 28px !important;
+  }
+
+  .compact-form-panel #roomDimensionsGrid,
+  .compact-form-panel .grid-2,
+  .compact-form-panel .compact-grid-2,
+  .compact-form-panel .cutout-compact-grid,
+  .compact-form-panel .circle-dimensions-grid:not(.hidden) {
+    row-gap: 1px !important;
+    column-gap: 0 !important;
+    margin: 0 !important;
+  }
+
+  .compact-form-panel .room-shape-row,
+  .compact-form-panel .placement-optimization-row,
+  .compact-form-panel .shape-extra {
+    margin: 0 !important;
+  }
+
+  .compact-form-panel .field-hint {
+    margin: 1px 0 2px !important;
+    line-height: 1.15 !important;
+  }
+
+  .compact-form-panel .cutout-card {
+    margin: 1px 0 !important;
+    padding: 4px 7px !important;
+  }
+
+  .compact-form-panel .cutout-title {
+    margin: 0 0 1px !important;
+    line-height: 1.1 !important;
+  }
+
+  .compact-form-panel .second-cut-toggle {
+    min-height: 22px !important;
+    height: 22px !important;
+    margin: 0 !important;
+    padding: 0 1px !important;
+  }
+
+  .compact-form-panel #calculateBtn {
+    min-height: 32px !important;
+    height: 32px !important;
+    margin-top: 2px !important;
+  }
+}

@@ -1,4 +1,4 @@
-const APP_VERSION = "0.105";
+const APP_VERSION = "0.106"; // boundary patch: corner cutouts
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -815,32 +815,42 @@ function getRoomBoundarySegments(room) {
     segments.push([room.widthM, a, room.widthM, b]);
   }
 
-  // Vnitřní tři hrany každého výřezu.
+  // Vnitřní hrany výřezů. Hrana, která přesně splývá s vnější
+  // stěnou místnosti, se nekreslí — jinak by při odsazení 0 vznikala
+  // falešná šedá čára uvnitř vyříznuté části.
   for (const c of cuts) {
     if (c.side === "top") {
-      segments.push(
-        [c.x1,c.y1,c.x1,c.y2],
-        [c.x1,c.y2,c.x2,c.y2],
-        [c.x2,c.y2,c.x2,c.y1]
-      );
+      if (c.x1 > eps) {
+        segments.push([c.x1,c.y1,c.x1,c.y2]);
+      }
+      segments.push([c.x1,c.y2,c.x2,c.y2]);
+      if (c.x2 < room.widthM - eps) {
+        segments.push([c.x2,c.y2,c.x2,c.y1]);
+      }
     } else if (c.side === "bottom") {
-      segments.push(
-        [c.x1,c.y2,c.x1,c.y1],
-        [c.x1,c.y1,c.x2,c.y1],
-        [c.x2,c.y1,c.x2,c.y2]
-      );
+      if (c.x1 > eps) {
+        segments.push([c.x1,c.y2,c.x1,c.y1]);
+      }
+      segments.push([c.x1,c.y1,c.x2,c.y1]);
+      if (c.x2 < room.widthM - eps) {
+        segments.push([c.x2,c.y1,c.x2,c.y2]);
+      }
     } else if (c.side === "left") {
-      segments.push(
-        [c.x1,c.y1,c.x2,c.y1],
-        [c.x2,c.y1,c.x2,c.y2],
-        [c.x2,c.y2,c.x1,c.y2]
-      );
+      if (c.y1 > eps) {
+        segments.push([c.x1,c.y1,c.x2,c.y1]);
+      }
+      segments.push([c.x2,c.y1,c.x2,c.y2]);
+      if (c.y2 < room.lengthM - eps) {
+        segments.push([c.x2,c.y2,c.x1,c.y2]);
+      }
     } else {
-      segments.push(
-        [c.x2,c.y1,c.x1,c.y1],
-        [c.x1,c.y1,c.x1,c.y2],
-        [c.x1,c.y2,c.x2,c.y2]
-      );
+      if (c.y1 > eps) {
+        segments.push([c.x2,c.y1,c.x1,c.y1]);
+      }
+      segments.push([c.x1,c.y1,c.x1,c.y2]);
+      if (c.y2 < room.lengthM - eps) {
+        segments.push([c.x1,c.y2,c.x2,c.y2]);
+      }
     }
   }
 
