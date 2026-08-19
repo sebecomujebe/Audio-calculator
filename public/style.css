@@ -2326,3 +2326,6 @@ input[type="number"]::-webkit-outer-spin-button {
 #technicalCoverageAlignmentValue {
   font-variant-numeric: tabular-nums;
 }
+
+
+/* v0.115 – přirozený okrajový odstup geometrické sítě */
