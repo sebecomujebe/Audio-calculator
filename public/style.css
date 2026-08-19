@@ -1521,3 +1521,54 @@ input[type="number"]::-webkit-outer-spin-button {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* v0.100 – oprava výsledkových prvků po sloučení sekce reproduktorů */
+.spl-overview-panel {
+  padding: 18px 22px;
+}
+
+.spl-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.spl-overview-grid > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+  padding: 12px;
+}
+
+.spl-overview-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+.spl-overview-grid strong {
+  display: block;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+#splWithin3Value {
+  color: var(--good);
+}
+
+@media (max-width: 1100px) {
+  .spl-overview-grid {
+    grid-template-columns: repeat(3, minmax(0,1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .spl-overview-grid {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+}
