@@ -1,4 +1,4 @@
-const APP_VERSION = "0.122";
+const APP_VERSION = "0.124";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2881,13 +2881,7 @@ function circlePlacementGeometryScore(room, placements, targetSpacingM) {
   return spread*2.0 + spacingPenalty + boundaryPenalty/pts.length;
 }
 
-function generateCircleRingConfiguration(
-  room,
-  radiiM,
-  counts,
-  centerSpeaker,
-  stagger = true
-) {
+function generateCircleRingFamily(room, targetSpacingM, centerSpeaker) {
   const R = room.diameterM/2;
   const cx = R;
   const cy = R;
@@ -2900,154 +2894,76 @@ function generateCircleRingConfiguration(
     });
   }
 
-  for (let ringIndex=0; ringIndex<radiiM.length; ringIndex++) {
-    const rr = radiiM[ringIndex];
-    const n = Math.max(3, Math.round(counts[ringIndex] || 3));
-    const phase =
-      stagger && ringIndex%2
-        ? Math.PI/n
-        : 0;
+  // Přirozený okrajový odstup:
+  // stejně jako u mřížky nechceme středy krajních reproduktorů
+  // téměř na stěně. Cíl je přibližně polovina návrhové rozteče.
+  const preferredWallMarginM = targetSpacingM*0.50;
+  const maximumRingRadiusM = Math.max(
+    0,
+    R-preferredWallMarginM
+  );
+
+  // První prstenec.
+  const firstRadius =
+    centerSpeaker
+      ? targetSpacingM
+      : Math.max(
+          targetSpacingM*0.55,
+          targetSpacingM/Math.sqrt(3)
+        );
+
+  // Pokud je místnost příliš malá na standardní prstenec,
+  // použijeme jeden menší prstenec, ale stále jej nedáme na obvod.
+  if (
+    maximumRingRadiusM > targetSpacingM*0.30 &&
+    firstRadius > maximumRingRadiusM
+  ) {
+    const rr = maximumRingRadiusM;
+    const circumference = 2*Math.PI*rr;
+    const n = Math.max(
+      3,
+      Math.round(circumference/targetSpacingM)
+    );
 
     for (let i=0; i<n; i++) {
-      const a = phase + i*2*Math.PI/n;
+      const a = i*2*Math.PI/n;
       placements.push({
         x:(cx+Math.cos(a)*rr)*FEET_PER_METER,
         y:(cy+Math.sin(a)*rr)*FEET_PER_METER
       });
     }
+
+    return placements;
+  }
+
+  let ringIndex = 0;
+
+  for (
+    let rr=firstRadius;
+    rr <= maximumRingRadiusM+1e-6;
+    rr += targetSpacingM
+  ) {
+    const circumference = 2*Math.PI*rr;
+    const n = Math.max(
+      3,
+      Math.round(circumference/targetSpacingM)
+    );
+
+    // Každý druhý prstenec pootočíme o polovinu úhlové rozteče.
+    const phase = (ringIndex%2) ? Math.PI/n : 0;
+
+    for (let i=0; i<n; i++) {
+      const a = phase+i*2*Math.PI/n;
+      placements.push({
+        x:(cx+Math.cos(a)*rr)*FEET_PER_METER,
+        y:(cy+Math.sin(a)*rr)*FEET_PER_METER
+      });
+    }
+
+    ringIndex++;
   }
 
   return placements;
-}
-
-function circleRequiredDesignCoveragePct(coverage) {
-  const toleranceDb = Number(
-    coverage?.expectedSPLVariation || 3
-  );
-
-  // U volnějšího overlapu není smyslem kupovat mnoho dalších
-  // reproduktorů kvůli poslednímu zlomku plochy.
-  if (toleranceDb <= 1) return 99.7;
-  if (toleranceDb <= 2) return 99.5;
-  if (toleranceDb <= 3) return 99.0;
-  if (toleranceDb <= 4) return 98.5;
-  return 97.0;
-}
-
-function buildCircleRingCandidates(room, coverage) {
-  const R = room.diameterM/2;
-  const targetSpacingM = Math.max(
-    0.15,
-    coverage.targetSpacing/FEET_PER_METER
-  );
-
-  const footprintRadiusM = Math.max(
-    0.10,
-    (coverage.coverageDiameter/FEET_PER_METER)/2
-  );
-
-  // Počet prstenců jen odhadujeme z velikosti místnosti.
-  // Samotný počet repro pak vznikne systematickým prohledáním.
-  const maxRingCount = Math.max(
-    1,
-    Math.min(
-      4,
-      Math.ceil(
-        R /
-        Math.max(
-          footprintRadiusM*1.15,
-          targetSpacingM*0.58
-        )
-      )
-    )
-  );
-
-  const outerFractions = [0.74,0.82,0.89,0.94];
-  const densityFactors = [0.62,0.74,0.86,0.98,1.08];
-  const candidates = [];
-  const seen = new Set();
-
-  for (const centerSpeaker of [false,true]) {
-    for (let ringCount=1; ringCount<=maxRingCount; ringCount++) {
-      for (const outerFraction of outerFractions) {
-        const outerRadiusM = Math.min(
-          R*outerFraction,
-          Math.max(
-            footprintRadiusM*0.60,
-            R-footprintRadiusM*0.12
-          )
-        );
-
-        const radiiM = [];
-        for (let j=0; j<ringCount; j++) {
-          const fraction =
-            centerSpeaker
-              ? (j+1)/ringCount
-              : (j+1)/(ringCount+0.42);
-
-          radiiM.push(
-            Math.max(
-              footprintRadiusM*0.42,
-              outerRadiusM*fraction
-            )
-          );
-        }
-
-        for (const densityFactor of densityFactors) {
-          const counts = radiiM.map((rr,ringIndex) => {
-            const ideal =
-              2*Math.PI*rr/targetSpacingM;
-
-            // Vnitřní kruh může být úspornější, vnější prstenec
-            // musí držet geometrii obvodu.
-            const radialWeight =
-              ringCount <= 1
-                ? 1
-                : 0.88 + 0.12*(ringIndex/(ringCount-1));
-
-            return Math.max(
-              3,
-              Math.round(
-                ideal*densityFactor*radialWeight
-              )
-            );
-          });
-
-          const key = [
-            centerSpeaker ? 1 : 0,
-            ...radiiM.map(r=>r.toFixed(2)),
-            ...counts
-          ].join("|");
-
-          if (seen.has(key)) continue;
-          seen.add(key);
-
-          const placements = generateCircleRingConfiguration(
-            room,
-            radiiM,
-            counts,
-            centerSpeaker,
-            true
-          );
-
-          candidates.push({
-            method:
-              `${centerSpeaker ? "Kruhová se středem" : "Kruhová bez středu"}` +
-              ` • ${ringCount} ${ringCount===1 ? "prstenec" : "prstence"}`,
-            family:centerSpeaker
-              ? "rings-center"
-              : "rings-no-center",
-            placements,
-            ringCount,
-            ringCounts:counts.slice(),
-            ringRadiiM:radiiM.slice()
-          });
-        }
-      }
-    }
-  }
-
-  return candidates;
 }
 function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
   const R = room.diameterM/2;
@@ -3090,7 +3006,20 @@ function buildCircleCoverageDesignCandidates(room, coverage) {
   );
 
   const candidates = [
-    ...buildCircleRingCandidates(room,coverage),
+    {
+      method:"Kruhové prstence se středovým repro",
+      family:"rings-center",
+      placements:generateCircleRingFamily(
+        room,targetSpacingM,true
+      )
+    },
+    {
+      method:"Kruhové prstence bez středového repro",
+      family:"rings-no-center",
+      placements:generateCircleRingFamily(
+        room,targetSpacingM,false
+      )
+    },
     {
       method:"Řady 0° v kruhu",
       family:"rows-0",
@@ -3120,11 +3049,8 @@ function buildCircleCoverageDesignCandidates(room, coverage) {
       )
     }));
 }
-function chooseCircleCoverageDesign(
-  room,
-  coverage,
-  circleMode = "circle-aligned"
-) {
+
+function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned") {
   const allCandidates = buildCircleCoverageDesignCandidates(
     room,coverage
   );
@@ -3140,55 +3066,26 @@ function chooseCircleCoverageDesign(
 
   if (!candidates.length) return null;
 
-  const requiredCoveragePct =
-    circleMode === "circle-rings"
-      ? circleRequiredDesignCoveragePct(coverage)
-      : 99.5;
-
-  // Nejmenší pravidelná konfigurace, která už splní návrhové
-  // coverage kritérium. Poslední procenta nepřidávají automaticky
-  // další reproduktory, zejména u ±7 dB.
-  const acceptable = candidates
-    .filter(c =>
-      c.designCoveragePct >= requiredCoveragePct
-    )
-    .sort((a,b) =>
+  // Přednost má nejmenší geometrická konfigurace s prakticky plným
+  // návrhovým pokrytím footprinty. Když 100 % není dosažitelné,
+  // vezmeme nejlepší pokrytí a až potom menší počet.
+  const complete = candidates
+    .filter(c=>c.designCoveragePct>=99.5)
+    .sort((a,b)=>
       a.count-b.count ||
-      b.designCoveragePct-a.designCoveragePct ||
       a.geometryScore-b.geometryScore
     );
 
-  let chosen;
-
-  if (acceptable.length) {
-    chosen = acceptable[0];
-  } else {
-    const bestCoverage = Math.max(
-      ...candidates.map(c=>c.designCoveragePct)
-    );
-
-    // Když požadovaný práh není dosažitelný, vezmeme nejmenší
-    // konfiguraci do 0,8 procentního bodu od nejlepšího výsledku.
-    const nearBest = candidates
-      .filter(c =>
-        c.designCoveragePct >= bestCoverage-0.8
-      )
-      .sort((a,b) =>
+  const chosen = complete.length
+    ? complete[0]
+    : candidates.slice().sort((a,b)=>
+        b.designCoveragePct-a.designCoveragePct ||
         a.count-b.count ||
-        b.designCoveragePct-a.designCoveragePct ||
         a.geometryScore-b.geometryScore
-      );
-
-    chosen = nearBest[0] ||
-      candidates.slice().sort((a,b) =>
-        b.designCoveragePct-a.designCoveragePct ||
-        a.count-b.count
       )[0];
-  }
 
   return {
     ...chosen,
-    requiredDesignCoveragePct:requiredCoveragePct,
     clearanceM:recommendedWallClearanceMeters(
       coverage,room
     ),
@@ -3198,6 +3095,7 @@ function chooseCircleCoverageDesign(
     source:"circle-coverage"
   };
 }
+
 function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
   const clearanceM = recommendedWallClearanceMeters(coverage, room);
 
@@ -5135,8 +5033,7 @@ function calculate() {
       targetMet:null,
       source:"circle-coverage",
       optimizationPolicy:null,
-      circleDesignCoveragePct:circleDesign.designCoveragePct,
-      circleRequiredCoveragePct:circleDesign.requiredDesignCoveragePct
+      circleDesignCoveragePct:circleDesign.designCoveragePct
     };
   } else {
     const sscLayout = getSscRegularAutomaticLayout(
@@ -5309,19 +5206,11 @@ function calculate() {
     const circlePct = Number(
       countRecommendation.circleDesignCoveragePct
     );
-    const circleRequiredPct = Number(
-      countRecommendation.circleRequiredCoveragePct
-    );
     document.getElementById("technicalToleranceGoalValue").textContent =
-      `Kruh: coverage footprinty pro ±${toleranceDb} dB • ${recommendedCount} ks` +
+      `Kruh: coverage footprinty pro ±${toleranceDb} dB • ${recommendedCount} ks • okraj cca ½ rozteče` +
       (
         Number.isFinite(circlePct)
-          ? ` • návrhově pokryto ${circlePct.toFixed(1)} %`
-          : ""
-      ) +
-      (
-        Number.isFinite(circleRequiredPct)
-          ? ` • minimum ${circleRequiredPct.toFixed(1)} %`
+          ? ` • návrhově pokryto ${circlePct.toFixed(1)} % plochy`
           : ""
       );
   } else {

@@ -2338,4 +2338,6 @@ input[type="number"]::-webkit-outer-spin-button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-/* v0.122 – kruhová varianta prohledává více počtů/prstenců. */
+/* v0.123 – rollback kruhové optimalizace na stabilní v0.121. */
+
+/* v0.124 – kruhové prstence s přirozeným okrajem cca 1/2 rozteče. */
