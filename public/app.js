@@ -1,4 +1,4 @@
-const APP_VERSION = "0.113";
+const APP_VERSION = "0.114";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -1706,196 +1706,544 @@ function freeCoverageSeed(count, room, clearanceM) {
   return chooseSpreadSubset(candidates, count, room, samples);
 }
 
+
+function medianNumber(values) {
+  if (!values?.length) return 0;
+  const arr = values.slice().sort((a,b)=>a-b);
+  const m = Math.floor(arr.length/2);
+  return arr.length % 2 ? arr[m] : (arr[m-1]+arr[m])/2;
+}
+
+function balancedAllocationVariants(count, rows) {
+  if (rows < 1 || rows > count) return [];
+  const base = Math.floor(count / rows);
+  const remainder = count % rows;
+  if (base < 1) return [];
+
+  if (remainder === 0) {
+    return [Array(rows).fill(base)];
+  }
+
+  const variants = [];
+  const center = (rows - 1) / 2;
+
+  // Varianta A: delší řady co nejvíc symetricky kolem středu.
+  const centeredOrder = [...Array(rows).keys()]
+    .sort((a,b) => Math.abs(a-center)-Math.abs(b-center) || a-b);
+  const centered = Array(rows).fill(base);
+  centeredOrder.slice(0,remainder).forEach(i => centered[i]++);
+  variants.push(centered);
+
+  // Varianta B: delší řady rovnoměrně rozprostřené.
+  const spread = Array(rows).fill(base);
+  const used = new Set();
+  for (let k=0; k<remainder; k++) {
+    let i = Math.round((k + 0.5) * rows / remainder - 0.5);
+    i = Math.max(0,Math.min(rows-1,i));
+    while (used.has(i) && i < rows-1) i++;
+    while (used.has(i) && i > 0) i--;
+    used.add(i);
+    spread[i]++;
+  }
+  if (spread.join(",") !== centered.join(",")) variants.push(spread);
+
+  return variants;
+}
+
+function structuredPatternPoints(allocations, staggerRows = false, rowPitch = 1) {
+  const rows = allocations.length;
+  const points = [];
+  const equalRows = allocations.every(v => v === allocations[0]);
+
+  for (let r=0; r<rows; r++) {
+    const n = allocations[r];
+    const y = (r - (rows-1)/2) * rowPitch;
+    const extraShift = staggerRows && equalRows
+      ? ((r % 2) ? 0.25 : -0.25)
+      : 0;
+
+    for (let c=0; c<n; c++) {
+      points.push({
+        ux: c - (n-1)/2 + extraShift,
+        uy: y
+      });
+    }
+  }
+
+  // Přesné vystředění celé struktury.
+  const cx = points.reduce((s,p)=>s+p.ux,0)/points.length;
+  const cy = points.reduce((s,p)=>s+p.uy,0)/points.length;
+  return points.map(p => ({ux:p.ux-cx, uy:p.uy-cy}));
+}
+
+function transformedUnitPattern(pattern, angleDeg) {
+  const a = angleDeg*Math.PI/180;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  return pattern.map(p => ({
+    ux:p.ux*ca-p.uy*sa,
+    uy:p.ux*sa+p.uy*ca
+  }));
+}
+
+function maxScaleForPattern(pattern, room, centroid, clearanceM) {
+  let maxScale = Infinity;
+
+  for (const p of pattern) {
+    if (p.ux < -1e-8) {
+      maxScale = Math.min(
+        maxScale,
+        Math.max(0,centroid.xM-clearanceM)/(-p.ux)
+      );
+    } else if (p.ux > 1e-8) {
+      maxScale = Math.min(
+        maxScale,
+        Math.max(0,room.widthM-centroid.xM-clearanceM)/p.ux
+      );
+    }
+
+    if (p.uy < -1e-8) {
+      maxScale = Math.min(
+        maxScale,
+        Math.max(0,centroid.yM-clearanceM)/(-p.uy)
+      );
+    } else if (p.uy > 1e-8) {
+      maxScale = Math.min(
+        maxScale,
+        Math.max(0,room.lengthM-centroid.yM-clearanceM)/p.uy
+      );
+    }
+  }
+
+  return Number.isFinite(maxScale) ? maxScale : 0;
+}
+
+function materializeLatticePattern({
+  pattern,
+  room,
+  clearanceM,
+  fillFactor,
+  angleDeg,
+  method,
+  alignmentWeight,
+  rowPitch,
+  allowNudges
+}) {
+  const samples = makeOptimizationSamples(room,180);
+  const centroid = roomSampleCentroid(room,samples);
+  const transformed = transformedUnitPattern(pattern,angleDeg);
+  const maximumScale = maxScaleForPattern(
+    transformed,room,centroid,clearanceM
+  );
+  const scale = maximumScale*fillFactor;
+  if (!(scale > 0.05)) return null;
+
+  const placements = [];
+  let nudgedCount = 0;
+
+  for (const p of transformed) {
+    let xM = centroid.xM+p.ux*scale;
+    let yM = centroid.yM+p.uy*scale;
+
+    const legal =
+      isPointInsideRoomMeters(xM,yM,room) &&
+      distanceToRoomBoundaryMeters(xM,yM,room) >= clearanceM*0.72;
+
+    if (!legal) {
+      if (!allowNudges || room.shape === "rectangle") return null;
+      if (nudgedCount >= 3) return null;
+
+      const q = clampPointToRoomWithClearance(
+        xM,yM,room,clearanceM*0.82
+      );
+      xM = q.xM;
+      yM = q.yM;
+      nudgedCount++;
+
+      if (!isPointInsideRoomMeters(xM,yM,room)) return null;
+    }
+
+    placements.push({
+      x:xM*FEET_PER_METER,
+      y:yM*FEET_PER_METER
+    });
+  }
+
+  const clean = dedupePlacementPoints(placements,0.18);
+  if (clean.length !== placements.length) return null;
+
+  const latticeRatio = Math.max(
+    Math.abs(rowPitch),
+    1/Math.max(0.01,Math.abs(rowPitch))
+  );
+
+  return {
+    placements:clean,
+    method:nudgedCount
+      ? `${method} • ${nudgedCount} lokální korekce`
+      : method,
+    alignmentWeight,
+    clearanceM,
+    latticeRatio,
+    latticeAngleDeg:angleDeg,
+    latticeSpacingM:scale,
+    nudgedCount,
+    isStructuredLattice:true
+  };
+}
+
+function structuredLatticeCandidatesForCount(
+  count,
+  room,
+  clearanceM,
+  mode,
+  quality = "full"
+) {
+  if (count < 1) return [];
+
+  const aspect = Math.max(0.2,room.widthM/Math.max(0.2,room.lengthM));
+  const estimatedRows = Math.max(
+    1,
+    Math.round(Math.sqrt(count/Math.max(0.2,aspect)))
+  );
+
+  const rowRadius = quality === "coarse" ? 1 : 2;
+  const rowValues = new Set();
+  for (
+    let rows=Math.max(1,estimatedRows-rowRadius);
+    rows<=Math.min(count,estimatedRows+rowRadius);
+    rows++
+  ) {
+    rowValues.add(rows);
+  }
+
+  // Přidáme nejbližší skutečné dělitele – čisté obdélníkové mřížky
+  // jsou pro obdélník velmi cenné.
+  for (let rows=1; rows<=Math.sqrt(count); rows++) {
+    if (count%rows === 0) {
+      rowValues.add(rows);
+      rowValues.add(count/rows);
+    }
+  }
+
+  const angles =
+    mode === "regular"
+      ? [0]
+      : mode === "balanced"
+        ? (quality === "coarse" ? [0,45] : [0,30,45,60])
+        : (quality === "coarse" ? [0,30,60] : [0,15,30,45,60,75]);
+
+  const styles =
+    mode === "regular"
+      ? [
+          {stagger:false,rowPitch:1,method:"Pevná mřížka X/Y",weight:4.0}
+        ]
+      : [
+          {stagger:false,rowPitch:1,method:"Pravoúhlá mřížka",weight:3.5},
+          {stagger:true,rowPitch:0.866,method:"Posunutá hexagonální mřížka",weight:3.7}
+        ];
+
+  const fillFactors =
+    quality === "coarse"
+      ? [0.84,0.96]
+      : [0.76,0.86,0.95,1.0];
+
+  const generated = [];
+
+  for (const rows of [...rowValues].sort((a,b)=>a-b)) {
+    const allocationVariants = balancedAllocationVariants(count,rows);
+
+    for (const allocations of allocationVariants) {
+      // U obdélníku nechceme v režimu Vyvážené chaotické neúplné řady.
+      // Rozdíl počtu bodů mezi řadami smí být maximálně jeden.
+      if (
+        room.shape === "rectangle" &&
+        Math.max(...allocations)-Math.min(...allocations) > 1
+      ) continue;
+
+      for (const style of styles) {
+        const pattern = structuredPatternPoints(
+          allocations,
+          style.stagger,
+          style.rowPitch
+        );
+
+        for (const angle of angles) {
+          for (const fillFactor of fillFactors) {
+            const candidate = materializeLatticePattern({
+              pattern,
+              room,
+              clearanceM,
+              fillFactor,
+              angleDeg:angle,
+              method:
+                angle === 0
+                  ? style.method
+                  : `${style.method} ${angle}°`,
+              alignmentWeight:style.weight,
+              rowPitch:style.rowPitch,
+              allowNudges:room.shape !== "rectangle" && mode !== "regular"
+            });
+
+            if (!candidate) continue;
+
+            // Vyvážené nikdy nepřipustí výrazně deformovanou základní síť.
+            if (mode === "balanced" && candidate.latticeRatio > 1.45) continue;
+
+            const geometry = placementGeometryScore(
+              candidate.placements,
+              room,
+              makeOptimizationSamples(room,quality==="coarse"?120:180),
+              clearanceM
+            );
+
+            generated.push({
+              ...candidate,
+              latticeGeometryScore:geometry
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Zachováme různé geometrické rodiny, ne jen několik téměř totožných
+  // kandidátů z jedné rodiny.
+  generated.sort((a,b)=>a.latticeGeometryScore-b.latticeGeometryScore);
+  const limit = quality === "coarse"
+    ? (mode === "coverage" ? 8 : 7)
+    : (mode === "coverage" ? 18 : 14);
+
+  const selected = [];
+  const seen = new Set();
+
+  for (const candidate of generated) {
+    const family = [
+      candidate.method.replace(/\d+°/g,"ANGLE"),
+      Math.round(candidate.latticeAngleDeg/15)*15,
+      candidate.nudgedCount
+    ].join("|");
+
+    const locationKey = candidate.placements
+      .map(p=>`${(p.x/FEET_PER_METER).toFixed(1)},${(p.y/FEET_PER_METER).toFixed(1)}`)
+      .sort()
+      .join(";");
+
+    const key = `${family}|${locationKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push(candidate);
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
+}
+
+function weakestCoverageSample({
+  placements,room,mountingHeightFt,listenerHeightFt,speaker,tap
+}) {
+  const samples = makeOptimizationSamples(room,180);
+  let weakest = null;
+
+  for (const p of samples) {
+    const spl = calculateSPLAtPoint({
+      xFt:p.xM*FEET_PER_METER,
+      yFt:p.yM*FEET_PER_METER,
+      listenerHeightFt,
+      placements,
+      mountingHeightFt,
+      speaker,
+      tap
+    });
+    if (!weakest || spl < weakest.spl) {
+      weakest = {...p,spl};
+    }
+  }
+  return weakest;
+}
+
+function balancedCandidateQuality(acoustic,geometry,alignmentWeight=0) {
+  return (
+    acoustic.tolerancePct*2.0 -
+    acoustic.spread*1.2 -
+    acoustic.largestHolePct*7.0 -
+    Math.max(0,acoustic.spacingBalanceRatio-1.25)*18 -
+    geometry*1.0 +
+    alignmentWeight*3.0
+  );
+}
+
+function tryLimitedBalancedNudges(candidate,args,tap,toleranceDb) {
+  if (
+    !candidate ||
+    args.room.shape === "rectangle" ||
+    !candidate.isStructuredLattice
+  ) return candidate;
+
+  let current = {
+    ...candidate,
+    placements:candidate.placements.map(p=>({...p}))
+  };
+  let moved = 0;
+  const movedIndices = new Set();
+
+  for (let attempt=0; attempt<3; attempt++) {
+    const weak = weakestCoverageSample({
+      placements:current.placements,
+      room:args.room,
+      mountingHeightFt:args.mountingHeightFt,
+      listenerHeightFt:args.listenerHeightFt,
+      speaker:args.speaker,
+      tap
+    });
+    if (!weak) break;
+
+    let nearestIndex = -1;
+    let nearestDistance = Infinity;
+    for (let i=0; i<current.placements.length; i++) {
+      if (movedIndices.has(i)) continue;
+      const p = current.placements[i];
+      const d = Math.hypot(
+        p.x/FEET_PER_METER-weak.xM,
+        p.y/FEET_PER_METER-weak.yM
+      );
+      if (d < nearestDistance) {
+        nearestDistance=d;
+        nearestIndex=i;
+      }
+    }
+    if (nearestIndex < 0) break;
+
+    const proposal = current.placements.map(p=>({...p}));
+    const original = proposal[nearestIndex];
+    const ox = original.x/FEET_PER_METER;
+    const oy = original.y/FEET_PER_METER;
+    const moveFraction = 0.22;
+
+    const q = clampPointToRoomWithClearance(
+      ox+(weak.xM-ox)*moveFraction,
+      oy+(weak.yM-oy)*moveFraction,
+      args.room,
+      current.clearanceM*0.80
+    );
+    proposal[nearestIndex] = {
+      x:q.xM*FEET_PER_METER,
+      y:q.yM*FEET_PER_METER
+    };
+
+    const acoustic = quickAcousticMetrics({
+      placements:proposal,
+      room:args.room,
+      mountingHeightFt:args.mountingHeightFt,
+      listenerHeightFt:args.listenerHeightFt,
+      speaker:args.speaker,
+      tap,
+      targetSPL:args.targetSPL,
+      toleranceDb,
+      sampleCount:220
+    });
+
+    const geometry = placementGeometryScore(
+      proposal,args.room,makeOptimizationSamples(args.room,180),current.clearanceM
+    );
+
+    const oldQuality = balancedCandidateQuality(
+      current.acoustic,current.geometryScore,current.alignmentWeight
+    );
+    const newQuality = balancedCandidateQuality(
+      acoustic,geometry,current.alignmentWeight
+    );
+
+    // Posun přijmeme jen při skutečném zlepšení a bez rozpadu sítě.
+    if (
+      newQuality > oldQuality+0.8 &&
+      acoustic.spacingBalanceRatio <= 1.65
+    ) {
+      current = {
+        ...current,
+        placements:proposal,
+        acoustic,
+        geometryScore:geometry
+      };
+      movedIndices.add(nearestIndex);
+      moved++;
+    } else {
+      movedIndices.add(nearestIndex);
+    }
+  }
+
+  if (moved) {
+    current.method = `${candidate.method} • akustická korekce ${moved} repro`;
+    current.nudgedCount = (candidate.nudgedCount||0)+moved;
+  }
+  return current;
+}
+
 function buildLayoutCandidates(count, coverage, room, mode, quality = "full") {
-  const clearanceM = recommendedWallClearanceMeters(coverage, room);
+  const clearanceM = recommendedWallClearanceMeters(coverage,room);
   const cacheKey = [
+    "lattice-v114",
     roomGeometryCacheKey(room),
     `count=${count}`,
     `mode=${mode}`,
     `quality=${quality}`,
-    `spacing=${Number(coverage.targetSpacing || 0).toFixed(3)}`,
+    `spacing=${Number(coverage.targetSpacing||0).toFixed(3)}`,
     `clearance=${clearanceM.toFixed(3)}`
   ].join(";");
 
   const cached = LAYOUT_CANDIDATE_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const result = [];
-  const samples = makeOptimizationSamples(room, quality === "coarse" ? 180 : 280);
-
-  const add = (placements, method, alignmentWeight) => {
-    if (!placements || placements.length !== count) return;
-    const clean = dedupePlacementPoints(placements);
-    if (clean.length !== count) return;
-    result.push({
-      placements:clean,
-      method,
-      alignmentWeight,
-      clearanceM
-    });
-  };
-
-  const perFamily = quality === "coarse" ? 2 : 4;
-
-  // PRAVIDELNÉ: striktní X/Y. U kruhu je mřížka vystředěná.
-  for (const candidate of regularGridCandidatesForCount(
-    count, room, clearanceM, 0, false, perFamily
-  )) {
-    add(candidate, "Pravidelná mřížka X/Y", 3.0);
-  }
-
-  if (mode !== "regular") {
-    // VYVÁŽENÉ: geometricky čitelné varianty.
-    for (const candidate of regularGridCandidatesForCount(
-      count, room, clearanceM, 0, true, perFamily
-    )) {
-      add(candidate, "Posunuté zarovnané řady", 2.5);
-    }
-
-    for (const candidate of regularGridCandidatesForCount(
-      count, room, clearanceM, 45, false, quality === "coarse" ? 1 : 3
-    )) {
-      add(candidate, "Mřížka otočená 45°", 2.4);
-    }
-
-    // -45° je u symetrických půdorysů prakticky ekvivalentní.
-    // V hrubé fázi jej vynecháme, v plné fázi ponecháme.
-    if (quality !== "coarse") {
-      for (const candidate of regularGridCandidatesForCount(
-        count, room, clearanceM, -45, false, 2
-      )) {
-        add(candidate, "Mřížka otočená −45°", 2.4);
-      }
-    }
-
-    // U režimu Nejlepší pokrytí chceme po nalezení akustického optima
-    // hledat i jemněji natočené geometrické sítě, nejen 0/45°.
-    if (mode === "coverage") {
-      const extraAngles = quality === "coarse"
-        ? [30, 60]
-        : [15, 30, 60, 75];
-
-      for (const angle of extraAngles) {
-        for (const candidate of regularGridCandidatesForCount(
-          count,
-          room,
-          clearanceM,
-          angle,
-          false,
-          quality === "coarse" ? 1 : 2
-        )) {
-          add(candidate, `Šikmá mřížka ${angle}°`, 2.35);
-        }
-
-        // Posunuté řady v šikmé síti dávají hexagonálně působící strukturu.
-        if (quality !== "coarse" && (angle === 30 || angle === 60)) {
-          for (const candidate of regularGridCandidatesForCount(
-            count,
-            room,
-            clearanceM,
-            angle,
-            true,
-            2
-          )) {
-            add(candidate, `Šikmé posunuté řady ${angle}°`, 2.55);
-          }
-        }
-      }
-    }
-
-    add(
-      adaptiveAlignedRowsCandidate(count, room, clearanceM, false),
-      "Dynamicky zarovnané řady",
-      2.7
-    );
-
-    if (quality !== "coarse") {
-      add(
-        adaptiveAlignedRowsCandidate(count, room, clearanceM, true),
-        "Dynamicky zarovnané sloupce",
-        2.7
-      );
-    }
-
-    if (room.shape === "circle") {
-      add(
-        concentricCircleCandidate(count, room, clearanceM),
-        "Kruhově zarovnané rozmístění",
-        2.2
-      );
-    }
-  }
+  const result = structuredLatticeCandidatesForCount(
+    count,room,clearanceM,mode,quality
+  );
 
   if (mode === "coverage") {
-    // Pro pokrytí stačí několik nejlepších různých seedů.
-    const seedList = result.slice(0, quality === "coarse" ? 3 : 6).map(x => x.placements);
-    seedList.push(freeCoverageSeed(count, room, clearanceM));
+    // Akustické optimum vznikne uvolněním několika nejlepších CELÝCH sítí.
+    // Síť tedy není výsledkem náhodného výběru jednotlivých bodů.
+    const seeds = result
+      .slice(0,quality==="coarse"?4:7)
+      .map(c=>c.placements);
 
-    const uniqueSeeds = [];
-    const seedKeys = new Set();
-    for (const seed of seedList) {
-      if (!seed || seed.length !== count) continue;
+    const freeSeed = freeCoverageSeed(count,room,clearanceM);
+    if (freeSeed?.length === count) seeds.push(freeSeed);
+
+    const seen = new Set();
+    const freeCandidates = [];
+    const iterations = quality === "coarse" ? 5 : 9;
+
+    for (const seed of seeds) {
       const key = seed
-        .map(p => `${(p.x/FEET_PER_METER).toFixed(2)},${(p.y/FEET_PER_METER).toFixed(2)}`)
+        .map(p=>`${(p.x/FEET_PER_METER).toFixed(2)},${(p.y/FEET_PER_METER).toFixed(2)}`)
         .sort()
         .join("|");
-      if (seedKeys.has(key)) continue;
-      seedKeys.add(key);
-      uniqueSeeds.push(seed);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const placements = relaxPlacements(
+        seed,room,iterations,0.80,clearanceM*0.70
+      );
+      if (placements.length !== count) continue;
+
+      freeCandidates.push({
+        placements,
+        method:"Volné akustické optimum",
+        alignmentWeight:0,
+        clearanceM,
+        latticeRatio:null,
+        latticeAngleDeg:null,
+        latticeSpacingM:null,
+        nudgedCount:0,
+        isStructuredLattice:false
+      });
     }
 
-    const iterations = quality === "coarse" ? 5 : 8;
-    for (const seed of uniqueSeeds) {
-      add(
-        relaxPlacements(seed, room, iterations, 0.80, clearanceM * 0.70),
-        "Volná optimalizace pokrytí",
-        0
-      );
-    }
+    result.push(...freeCandidates);
   }
 
-  if (!result.length) {
-    const dense = [];
-    const nx = Math.max(
-      3,
-      Math.ceil(Math.sqrt(count * room.widthM / Math.max(0.2,room.lengthM)) * 2.0)
-    );
-    const ny = Math.max(
-      3,
-      Math.ceil(Math.sqrt(count * room.lengthM / Math.max(0.2,room.widthM)) * 2.0)
-    );
-
-    for (let iy=0; iy<ny; iy++) {
-      const yM = room.lengthM * (iy + 0.5) / ny;
-      for (let ix=0; ix<nx; ix++) {
-        const xM = room.widthM * (ix + 0.5) / nx;
-        if (!isPointInsideRoomMeters(xM,yM,room)) continue;
-        if (distanceToRoomBoundaryMeters(xM,yM,room) < clearanceM*0.65) continue;
-        dense.push({x:xM*FEET_PER_METER,y:yM*FEET_PER_METER});
-      }
-    }
-
-    let fallback = chooseSpreadSubset(dense, count, room, samples);
-    if (mode === "coverage" && fallback.length === count) {
-      fallback = relaxPlacements(
-        fallback,
-        room,
-        quality === "coarse" ? 5 : 8,
-        0.80,
-        clearanceM*0.70
-      );
-    }
-    add(
-      fallback,
-      mode === "coverage" ? "Volná optimalizace pokrytí" : "Pravidelná mřížka X/Y",
-      mode === "regular" ? 3 : 1
-    );
-  }
-
-  cacheSetLimited(LAYOUT_CANDIDATE_CACHE, cacheKey, result, 90);
+  cacheSetLimited(LAYOUT_CANDIDATE_CACHE,cacheKey,result,90);
   return result;
 }
-
 
 function placementSpacingBalanceMetrics(placements) {
   if (!placements || placements.length < 3) {
@@ -2114,74 +2462,62 @@ function getEvaluationTap({
 
 
 function isFreeCoverageCandidate(candidate) {
-  return candidate?.method === "Volná optimalizace pokrytí";
+  return candidate?.method === "Volné akustické optimum";
 }
 
 function coverageAcousticQuality(acoustic) {
   if (!acoustic) return -Infinity;
   return (
-    acoustic.tolerancePct * 2.2 -
-    acoustic.spread * 1.6 -
-    acoustic.targetDeficit * 6.0 -
-    acoustic.minTargetDeficit * 3.0 -
-    acoustic.largestHolePct * 4.5
+    acoustic.tolerancePct*2.4 -
+    acoustic.spread*1.55 -
+    acoustic.largestHolePct*4.0 -
+    acoustic.targetDeficit*6.0 -
+    acoustic.minTargetDeficit*2.8
   );
 }
 
-function alignedCoverageIsNearFree(aligned, free) {
+function alignedCoverageIsNearFree(aligned,free) {
   if (!aligned?.acoustic || !free?.acoustic) return false;
 
-  const toleranceLoss =
-    free.acoustic.tolerancePct - aligned.acoustic.tolerancePct;
-  const spreadIncrease =
-    aligned.acoustic.spread - free.acoustic.spread;
-  const holeIncrease =
-    aligned.acoustic.largestHolePct - free.acoustic.largestHolePct;
-  const averageLoss =
-    free.acoustic.average - aligned.acoustic.average;
-  const minLoss =
-    free.acoustic.min - aligned.acoustic.min;
-
   return (
-    toleranceLoss <= 1.0 &&
-    spreadIncrease <= 0.5 &&
-    holeIncrease <= 0.7 &&
-    averageLoss <= 0.4 &&
-    minLoss <= 0.8
+    free.acoustic.tolerancePct-aligned.acoustic.tolerancePct <= 1.0 &&
+    aligned.acoustic.spread-free.acoustic.spread <= 0.55 &&
+    aligned.acoustic.largestHolePct-free.acoustic.largestHolePct <= 0.75 &&
+    free.acoustic.average-aligned.acoustic.average <= 0.45 &&
+    free.acoustic.min-aligned.acoustic.min <= 0.9
   );
 }
 
-function alignmentPreferenceScore(candidate) {
+function alignedCoveragePreference(candidate) {
   if (!candidate?.acoustic) return -Infinity;
-
-  // Jakmile je akustika prakticky stejná jako volné optimum,
-  // preferujeme čistou geometrii, menší souvislé odchylky
-  // a rovnoměrnější rozteče.
   return (
-    candidate.alignmentWeight * 8.0 -
-    candidate.acoustic.spacingBalanceRatio * 4.0 -
-    candidate.acoustic.largestHolePct * 3.0 +
-    candidate.acoustic.tolerancePct * 0.25 -
-    candidate.acoustic.spread * 0.35
+    candidate.alignmentWeight*10 -
+    candidate.acoustic.largestHolePct*4 -
+    Math.max(0,candidate.acoustic.spacingBalanceRatio-1.2)*8 +
+    candidate.acoustic.tolerancePct*0.35 -
+    candidate.acoustic.spread*0.35 -
+    (candidate.nudgedCount||0)*1.5
   );
 }
 
 function selectBestLayoutForCount(args) {
   const {
-    count, coverage, room, mode, speaker, targetSPL,
-    ambientNoise, useCase, voltage, mountingHeightFt,
-    listenerHeightFt, requestedTap = "auto", quality = "full"
+    count,coverage,room,mode,speaker,targetSPL,
+    ambientNoise,useCase,voltage,mountingHeightFt,
+    listenerHeightFt,requestedTap="auto",quality="full"
   } = args;
 
-  const candidates = buildLayoutCandidates(count, coverage, room, mode, quality);
+  const candidates = buildLayoutCandidates(
+    count,coverage,room,mode,quality
+  );
   if (!candidates.length) return null;
 
   const {tap} = getEvaluationTap({
     count,coverage,speaker,targetSPL,ambientNoise,useCase,voltage,requestedTap
   });
 
-  const toleranceDb = Number(coverage.expectedSPLVariation) || 3;
-  const sampleCount = quality === "coarse" ? 130 : 240;
+  const toleranceDb = Number(coverage.expectedSPLVariation)||3;
+  const sampleCount = quality==="coarse"?130:240;
   const evaluated = [];
 
   for (const candidate of candidates) {
@@ -2197,52 +2533,49 @@ function selectBestLayoutForCount(args) {
       sampleCount
     });
 
-    const geometry = placementGeometryScore(
+    const geometryScore = placementGeometryScore(
       candidate.placements,
       room,
-      makeOptimizationSamples(room, quality === "coarse" ? 150 : 260),
+      makeOptimizationSamples(room,quality==="coarse"?130:200),
       candidate.clearanceM
     );
 
     let score;
+
     if (mode === "regular") {
       score =
-        acoustic.tolerancePct * 1.55 -
-        acoustic.spread * 1.15 -
-        acoustic.targetDeficit * 5.0 -
-        acoustic.minTargetDeficit * 2.2 -
-        geometry * 1.55 +
-        candidate.alignmentWeight * 2.2;
+        acoustic.tolerancePct*1.5 -
+        acoustic.spread*1.1 -
+        geometryScore*1.4 +
+        candidate.alignmentWeight*3;
     } else if (mode === "balanced") {
-      const holePenalty =
-        Math.pow(Math.max(0, acoustic.largestHolePct - 0.6), 1.35) * 8.0;
-      const spacingPenalty =
-        Math.pow(Math.max(0, acoustic.spacingBalanceRatio - 1.15), 1.45) * 15.0;
+      // Geometrie je zde základ, ne dodatečný bonus.
+      const ratioPenalty = Math.pow(
+        Math.max(0,acoustic.spacingBalanceRatio-1.25),1.5
+      )*22;
+      const holePenalty = Math.pow(
+        Math.max(0,acoustic.largestHolePct-0.5),1.35
+      )*9;
 
       score =
-        acoustic.tolerancePct * 1.85 -
-        acoustic.spread * 1.20 -
-        acoustic.targetDeficit * 5.0 -
-        acoustic.minTargetDeficit * 2.4 -
-        geometry * 1.10 -
-        holePenalty -
-        spacingPenalty +
-        candidate.alignmentWeight * 2.6;
+        acoustic.tolerancePct*1.9 -
+        acoustic.spread*1.15 -
+        acoustic.targetDeficit*5 -
+        acoustic.minTargetDeficit*2.3 -
+        geometryScore*1.0 -
+        ratioPenalty -
+        holePenalty +
+        candidate.alignmentWeight*4.5 -
+        (candidate.nudgedCount||0)*1.5;
     } else {
-      // První fáze režimu Nejlepší pokrytí je čistě akustická.
-      // Zarovnání zde záměrně nebonifikujeme.
-      score =
-        acoustic.tolerancePct * 1.90 -
-        acoustic.spread * 1.65 -
-        acoustic.targetDeficit * 5.5 -
-        acoustic.minTargetDeficit * 2.8 -
-        acoustic.largestHolePct * 3.0 -
-        geometry * 0.45;
+      // U Nejlepšího pokrytí tato hodnota hodnotí čistě akustiku.
+      score = coverageAcousticQuality(acoustic);
     }
 
     evaluated.push({
       ...candidate,
       acoustic,
+      geometryScore,
       score,
       evaluationTap:tap
     });
@@ -2250,50 +2583,63 @@ function selectBestLayoutForCount(args) {
 
   if (!evaluated.length) return null;
 
-  if (mode !== "coverage") {
-    return evaluated.slice().sort((a,b) => b.score-a.score)[0];
+  if (mode === "regular") {
+    return evaluated.slice().sort((a,b)=>b.score-a.score)[0];
   }
 
-  // NEJLEPŠÍ POKRYTÍ – dvoustupňová volba:
-  // A) najdeme nejlepší čistě akustické volné řešení,
-  // B) zjistíme, zda existuje geometricky zarovnaná síť se zanedbatelnou
-  //    ztrátou kvality. Pokud ano, použijeme ji.
-  const freeCandidates = evaluated.filter(isFreeCoverageCandidate);
-  const alignedCandidates = evaluated.filter(c => !isFreeCoverageCandidate(c));
+  if (mode === "balanced") {
+    let best = evaluated
+      .filter(c=>c.isStructuredLattice)
+      .sort((a,b)=>b.score-a.score)[0];
 
-  const freeBest = (freeCandidates.length ? freeCandidates : evaluated)
+    if (!best) return null;
+
+    // U obdélníku je struktura absolutní: žádné individuální posuny.
+    // U ostatních tvarů smíme akusticky korigovat maximálně tři body.
+    if (room.shape !== "rectangle" && quality === "full") {
+      best = tryLimitedBalancedNudges(
+        best,args,tap,toleranceDb
+      );
+    }
+    return best;
+  }
+
+  // NEJLEPŠÍ POKRYTÍ:
+  // 1) absolutní volné akustické optimum,
+  // 2) nejlepší celá geometrická síť se stejným počtem,
+  // 3) síť vyhraje, pokud je akusticky prakticky stejná.
+  const free = evaluated.filter(isFreeCoverageCandidate);
+  const structured = evaluated.filter(c=>c.isStructuredLattice);
+
+  const freeBest = (free.length?free:evaluated)
     .slice()
-    .sort((a,b) =>
-      coverageAcousticQuality(b.acoustic) - coverageAcousticQuality(a.acoustic)
-    )[0];
+    .sort((a,b)=>coverageAcousticQuality(b.acoustic)-coverageAcousticQuality(a.acoustic))[0];
 
-  if (!freeBest || !alignedCandidates.length) {
-    return freeBest || evaluated.slice().sort((a,b)=>b.score-a.score)[0];
-  }
+  const nearStructured = structured
+    .filter(c=>alignedCoverageIsNearFree(c,freeBest))
+    .sort((a,b)=>alignedCoveragePreference(b)-alignedCoveragePreference(a));
 
-  const nearAligned = alignedCandidates
-    .filter(candidate => alignedCoverageIsNearFree(candidate, freeBest))
-    .sort((a,b) =>
-      alignmentPreferenceScore(b) - alignmentPreferenceScore(a)
-    );
-
-  if (nearAligned.length) {
-    const chosen = nearAligned[0];
+  if (nearStructured.length) {
+    const chosen = nearStructured[0];
     return {
       ...chosen,
-      method:`${chosen.method} • téměř stejné pokrytí jako volné optimum`,
+      method:`${chosen.method} • geometricky zarovnáno`,
       postAligned:true,
       freeReference:{
         tolerancePct:freeBest.acoustic.tolerancePct,
         spread:freeBest.acoustic.spread,
-        largestHolePct:freeBest.acoustic.largestHolePct
-      }
+        largestHolePct:freeBest.acoustic.largestHolePct,
+        average:freeBest.acoustic.average,
+        min:freeBest.acoustic.min
+      },
+      freeAcoustic:freeBest.acoustic
     };
   }
 
   return {
     ...freeBest,
-    postAligned:false
+    postAligned:false,
+    freeAcoustic:freeBest.acoustic
   };
 }
 
@@ -2381,127 +2727,89 @@ function recommendationPasses(layout, targetSPL) {
 }
 
 function recommendSpeakerCountAndLayout(args) {
-  const cacheKey = recommendationCacheKey(args);
+  const cacheKey = `v114;${recommendationCacheKey(args)}`;
   const cached = COUNT_RECOMMENDATION_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const counts = candidateCountsForRecommendation(args.coverage, args.room);
-  const evaluated = [];
+  const counts = candidateCountsForRecommendation(
+    args.coverage,args.room
+  );
+  const coarse = [];
 
-  // VYVÁŽENÉ: neukončujeme hledání na prvním výsledku nad 95 %.
-  // Projdeme celý rozumný rozsah hrubě, potom několik nejlepších variant
-  // zpřesníme. Počet je až sekundární kritérium.
+  for (const count of counts) {
+    const layout = selectBestLayoutForCount({
+      ...args,count,quality:"coarse"
+    });
+    if (layout) coarse.push({count,...layout});
+  }
+  if (!coarse.length) return null;
+
   if (args.mode === "balanced") {
-    for (const count of counts) {
-      const layout = selectBestLayoutForCount({
-        ...args,
-        count,
-        quality:"coarse"
-      });
-      if (layout) evaluated.push({count,...layout});
-    }
+    // Vyvážené: nejprve skutečně dobrá geometrická síť, potom počet.
+    const bestTolerance = Math.max(
+      ...coarse.map(x=>x.acoustic.tolerancePct)
+    );
 
-    if (!evaluated.length) return null;
+    const promising = coarse
+      .filter(x =>
+        x.isStructuredLattice &&
+        x.acoustic.tolerancePct >= Math.max(95,bestTolerance-2.0) &&
+        x.acoustic.largestHolePct <= 2.0 &&
+        x.acoustic.spacingBalanceRatio <= 1.7
+      )
+      .sort((a,b)=>a.count-b.count || b.score-a.score);
 
-    const coarseRanked = evaluated
-      .slice()
-      .sort((a,b) => {
-        const aHealthy = balancedLayoutPasses(a,args.targetSPL) ? 1 : 0;
-        const bHealthy = balancedLayoutPasses(b,args.targetSPL) ? 1 : 0;
-        if (aHealthy !== bHealthy) return bHealthy-aHealthy;
+    const refineCounts = new Set(
+      (promising.length?promising:coarse.slice().sort((a,b)=>b.score-a.score))
+        .slice(0,6)
+        .map(x=>x.count)
+    );
 
-        // Preferujeme lepší pokrytí/geometrii, ale každý další reproduktor
-        // má malou cenu. To zabraňuje jak zbytečným 21 ks, tak agresivnímu
-        // osekání na řešení s viditelnou dírou.
-        const aUtility =
-          a.score -
-          a.count*0.85 -
-          a.acoustic.largestHolePct*4.0 -
-          Math.max(0,a.acoustic.spacingBalanceRatio-1.2)*10;
-        const bUtility =
-          b.score -
-          b.count*0.85 -
-          b.acoustic.largestHolePct*4.0 -
-          Math.max(0,b.acoustic.spacingBalanceRatio-1.2)*10;
-        return bUtility-aUtility;
-      });
-
-    // Zpřesníme několik nejlepších a také nejmenší zdravou variantu,
-    // aby algoritmus nepřehlédl úspornější řešení.
-    const refineSet = new Set(coarseRanked.slice(0,6).map(x=>x.count));
-    const healthyCounts = evaluated
-      .filter(x=>balancedLayoutPasses(x,args.targetSPL))
-      .map(x=>x.count)
-      .sort((a,b)=>a-b);
-    if (healthyCounts.length) {
-      refineSet.add(healthyCounts[0]);
-      if (healthyCounts[1]) refineSet.add(healthyCounts[1]);
+    // Přidáme sousední nižší počty, aby úsporná kvalitní síť neunikla.
+    for (const n of [...refineCounts]) {
+      if (n>1) refineCounts.add(n-1);
     }
 
     const refined = [];
-    for (const count of [...refineSet].sort((a,b)=>a-b)) {
+    for (const count of [...refineCounts].sort((a,b)=>a-b)) {
       const layout = selectBestLayoutForCount({
-        ...args,
-        count,
-        quality:"full"
+        ...args,count,quality:"full"
       });
       if (layout) refined.push({count,...layout});
     }
 
-    const pool = refined.length ? refined : evaluated;
-    const healthy = pool.filter(x=>balancedLayoutPasses(x,args.targetSPL));
+    const pool = refined.length?refined:coarse;
+    const bestTol = Math.max(...pool.map(x=>x.acoustic.tolerancePct));
 
-    let chosen;
-    if (healthy.length) {
-      const bestQuality = Math.max(...healthy.map(x =>
-        x.score -
-        x.acoustic.largestHolePct*5.0 -
-        Math.max(0,x.acoustic.spacingBalanceRatio-1.2)*12
-      ));
+    let eligible = pool.filter(x =>
+      x.isStructuredLattice &&
+      x.acoustic.tolerancePct >= Math.max(95,bestTol-2.0) &&
+      x.acoustic.largestHolePct <= 2.0 &&
+      x.acoustic.spacingBalanceRatio <= 1.7 &&
+      x.acoustic.average >= args.targetSPL-1.5 &&
+      x.acoustic.min >= args.targetSPL-7
+    );
 
-      // Přijmeme menší počet jen pokud zůstává velmi blízko nejlepší kvalitě.
-      // Tím získáme např. 12–15 pěkně rozmístěných repro místo 21 kusů,
-      // ale ne 12 kusů s velkou modrou dírou jen kvůli úspoře.
-      const nearBest = healthy.filter(x => {
-        const q =
-          x.score -
-          x.acoustic.largestHolePct*5.0 -
-          Math.max(0,x.acoustic.spacingBalanceRatio-1.2)*12;
-        return q >= bestQuality - 8;
-      });
-
-      chosen = nearBest
-        .slice()
-        .sort((a,b) =>
-          a.count-b.count ||
-          a.acoustic.largestHolePct-b.acoustic.largestHolePct ||
-          a.acoustic.spacingBalanceRatio-b.acoustic.spacingBalanceRatio ||
-          b.score-a.score
-        )[0];
-    } else {
-      chosen = pool
-        .slice()
-        .sort((a,b) => {
-          const aUtility =
-            a.score -
-            a.acoustic.largestHolePct*6 -
-            Math.max(0,a.acoustic.spacingBalanceRatio-1.2)*14 -
-            a.count*0.45;
-          const bUtility =
-            b.score -
-            b.acoustic.largestHolePct*6 -
-            Math.max(0,b.acoustic.spacingBalanceRatio-1.2)*14 -
-            b.count*0.45;
-          return bUtility-aUtility;
-        })[0];
+    if (!eligible.length) {
+      eligible = pool.slice().sort((a,b)=>b.score-a.score).slice(0,4);
     }
+
+    // Menší počet je výhoda až mezi geometricky a akusticky dobrými řešeními.
+    const chosen = eligible.slice().sort((a,b) =>
+      a.count-b.count ||
+      a.acoustic.largestHolePct-b.acoustic.largestHolePct ||
+      a.acoustic.spacingBalanceRatio-b.acoustic.spacingBalanceRatio ||
+      b.score-a.score
+    )[0];
 
     const result = {
       recommendedCount:chosen.count,
       chosen,
-      evaluated:[...evaluated,...refined],
+      evaluated:[...coarse,...refined],
       toleranceFloor:95,
-      targetMet:balancedLayoutPasses(chosen,args.targetSPL),
+      targetMet:
+        chosen.acoustic.tolerancePct>=95 &&
+        chosen.acoustic.largestHolePct<=2.0,
       balancedQuality:{
         largestHolePct:chosen.acoustic.largestHolePct,
         spacingBalanceRatio:chosen.acoustic.spacingBalanceRatio
@@ -2512,89 +2820,94 @@ function recommendSpeakerCountAndLayout(args) {
     return result;
   }
 
-  // NEJLEPŠÍ POKRYTÍ: zachováme rychlé hledání nejmenšího počtu
-  // splňujícího simulační kritérium.
-  let coarseWinner = null;
-  let previousCount = null;
+  // NEJLEPŠÍ POKRYTÍ:
+  // Najdeme nejlepší dosažitelnou akustiku v rozumném rozsahu a pak
+  // nejmenší počet, který je prakticky stejně dobrý.
+  const acousticOf = x => x.freeAcoustic||x.acoustic;
+  const bestTolerance = Math.max(
+    ...coarse.map(x=>acousticOf(x).tolerancePct)
+  );
+  const bestAcoustic = coarse.slice().sort((a,b) =>
+    coverageAcousticQuality(acousticOf(b))-
+    coverageAcousticQuality(acousticOf(a))
+  )[0];
+  const bestA = acousticOf(bestAcoustic);
 
-  for (const count of counts) {
-    const layout = selectBestLayoutForCount({
-      ...args,
-      count,
-      quality:"coarse"
-    });
+  let promising = coarse.filter(x => {
+    const a = acousticOf(x);
+    return (
+      a.tolerancePct >= Math.max(95,bestTolerance-1.0) &&
+      a.spread <= bestA.spread+0.8 &&
+      a.largestHolePct <= bestA.largestHolePct+0.8 &&
+      a.average >= args.targetSPL-1.5 &&
+      a.min >= args.targetSPL-7
+    );
+  });
 
-    if (!layout) continue;
-    evaluated.push({count, ...layout});
-
-    if (recommendationPasses(layout, args.targetSPL)) {
-      coarseWinner = {count, ...layout};
-      break;
-    }
-    previousCount = count;
-  }
-
-  let refinementCounts = [];
-  if (coarseWinner && previousCount !== null && coarseWinner.count - previousCount > 1) {
-    for (let n=previousCount + 1; n<=coarseWinner.count; n++) {
-      refinementCounts.push(n);
-    }
-  } else if (coarseWinner) {
-    refinementCounts = [coarseWinner.count];
-  }
-
-  if (!coarseWinner) {
-    const topCounts = evaluated
+  if (!promising.length) {
+    promising = coarse
       .slice()
-      .sort((a,b) =>
-        b.acoustic.tolerancePct - a.acoustic.tolerancePct ||
-        b.score - a.score
+      .sort((a,b)=>
+        coverageAcousticQuality(acousticOf(b))-
+        coverageAcousticQuality(acousticOf(a))
       )
-      .slice(0, 4)
-      .map(x => x.count);
-    refinementCounts = [...new Set(topCounts)].sort((a,b)=>a-b);
+      .slice(0,5);
   }
 
-  let chosen = null;
+  // Zpřesníme nejmenší dobré počty i absolutně nejlepší variantu.
+  const refineCounts = new Set(
+    promising
+      .slice()
+      .sort((a,b)=>a.count-b.count)
+      .slice(0,5)
+      .map(x=>x.count)
+  );
+  refineCounts.add(bestAcoustic.count);
+
   const refined = [];
-
-  for (const count of refinementCounts) {
+  for (const count of [...refineCounts].sort((a,b)=>a-b)) {
     const layout = selectBestLayoutForCount({
-      ...args,
-      count,
-      quality:"full"
+      ...args,count,quality:"full"
     });
-    if (!layout) continue;
-
-    const item = {count, ...layout};
-    refined.push(item);
-
-    if (recommendationPasses(layout, args.targetSPL)) {
-      chosen = item;
-      break;
-    }
+    if (layout) refined.push({count,...layout});
   }
 
-  if (!chosen) {
-    const pool = refined.length ? refined : evaluated;
-    if (!pool.length) return null;
+  const pool = refined.length?refined:promising;
+  const refinedBest = pool.slice().sort((a,b)=>
+    coverageAcousticQuality(acousticOf(b))-
+    coverageAcousticQuality(acousticOf(a))
+  )[0];
+  const reference = acousticOf(refinedBest);
+  const maxTol = Math.max(...pool.map(x=>acousticOf(x).tolerancePct));
 
-    chosen = pool.slice().sort((a,b) =>
-      b.acoustic.tolerancePct - a.acoustic.tolerancePct ||
-      b.score - a.score ||
-      a.count - b.count
-    )[0];
-  }
+  let nearBest = pool.filter(x => {
+    const a = acousticOf(x);
+    return (
+      a.tolerancePct >= Math.max(95,maxTol-1.0) &&
+      a.spread <= reference.spread+0.65 &&
+      a.largestHolePct <= reference.largestHolePct+0.7 &&
+      a.average >= args.targetSPL-1.5 &&
+      a.min >= args.targetSPL-7
+    );
+  });
+
+  if (!nearBest.length) nearBest=[refinedBest];
+
+  const chosen = nearBest.slice().sort((a,b)=>
+    a.count-b.count ||
+    coverageAcousticQuality(acousticOf(b))-
+    coverageAcousticQuality(acousticOf(a))
+  )[0];
 
   const result = {
     recommendedCount:chosen.count,
     chosen,
-    evaluated:[...evaluated, ...refined],
+    evaluated:[...coarse,...refined],
     toleranceFloor:95,
-    targetMet:recommendationPasses(chosen, args.targetSPL)
+    targetMet:acousticOf(chosen).tolerancePct>=95
   };
 
-  cacheSetLimited(COUNT_RECOMMENDATION_CACHE, cacheKey, result, 48);
+  cacheSetLimited(COUNT_RECOMMENDATION_CACHE,cacheKey,result,48);
   return result;
 }
 
@@ -4338,7 +4651,7 @@ function calculate() {
 
   const optimizationModeLabels = {
     regular: "Pevná mřížka – striktní X/Y",
-    balanced: "Vyvážené – geometricky zarovnané",
+    balanced: "Vyvážené – vždy geometrická síť",
     coverage: "Nejlepší pokrytí – volná optimalizace"
   };
   document.getElementById("placementOptimizationValue").textContent =
