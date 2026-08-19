@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.120" />
+  <link rel="stylesheet" href="style.css?v=0.121" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.120</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.121</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -30,11 +30,9 @@
         </label>
 
         <label class="placement-optimization-row">
-          <span>Optimalizace rozmístění</span>
+          <span>Rozmístění</span>
           <select id="placementOptimization">
-            <option value="regular">Pevná mřížka</option>
-            <option value="balanced" selected>Vyvážené – geometrie i pokrytí</option>
-            <option value="coverage">Nejlepší pokrytí</option>
+            <option value="regular" selected>Pevná mřížka</option>
           </select>
         </label>
 
@@ -288,12 +286,6 @@
                   <option value="auto">Automaticky</option>
                 </select>
               </div>
-              <div class="speaker-selector-wrap count-selector-wrap">
-                <label for="speakerCountOverride">Počet reproduktorů</label>
-                <select id="speakerCountOverride">
-                  <option value="auto">Automaticky – doporučený počet</option>
-                </select>
-              </div>
             </div>
           </div>
 
@@ -354,17 +346,19 @@
 
             <div class="floor-plan-controls">
               <label class="floor-plan-control">
-                <span>Počet reproduktorů</span>
-                <select id="speakerCountOverrideFloor">
-                  <option value="auto">Automaticky – doporučený počet</option>
+                <span>Pokrytí</span>
+                <select id="coverageDensityFloor">
+                  <option value="center-to-center">Střed ke středu (cca ±1 dB)</option>
+                  <option value="min-overlap">Minimální překrytí (cca ±2 dB)</option>
+                  <option value="balanced">Vyvážené překrytí (cca ±3 dB)</option>
+                  <option value="edge-to-edge" selected>Hrana k hraně (cca ±4 dB)</option>
+                  <option value="extended">Rozšířené rozestupy (cca ±7 dB)</option>
                 </select>
               </label>
               <label class="floor-plan-control">
-                <span>Optimalizace</span>
+                <span>Rozmístění</span>
                 <select id="placementOptimizationFloor">
                   <option value="regular">Pevná mřížka</option>
-                  <option value="balanced">Vyvážené – geometrie i pokrytí</option>
-                  <option value="coverage">Nejlepší pokrytí</option>
                 </select>
               </label>
             </div>
@@ -608,6 +602,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.120"></script>
+  <script src="app.js?v=0.121"></script>
 </body>
 </html>

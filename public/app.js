@@ -1,4 +1,4 @@
-const APP_VERSION = "0.120";
+const APP_VERSION = "0.121";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -686,10 +686,10 @@ function setSelectValueIfPresent(select, value) {
 }
 
 function syncFloorControlsFromMain() {
-  const countMain = document.getElementById("speakerCountOverride");
-  const countFloor = document.getElementById("speakerCountOverrideFloor");
-  if (countMain && countFloor) {
-    countFloor.value = countMain.value;
+  const coverageMain = document.getElementById("coverageDensity");
+  const coverageFloor = document.getElementById("coverageDensityFloor");
+  if (coverageMain && coverageFloor) {
+    setSelectValueIfPresent(coverageFloor, coverageMain.value);
   }
 
   const optimizationMain = document.getElementById("placementOptimization");
@@ -699,34 +699,64 @@ function syncFloorControlsFromMain() {
   }
 }
 
-function updatePlacementOptimizationAvailability() {
-  const shape = document.getElementById("roomShape")?.value || "rectangle";
-  const isCircle = shape === "circle";
+function fillPlacementModeSelect(select, options, preferredValue) {
+  if (!select) return;
+  select.innerHTML = "";
 
-  const selects = [
-    document.getElementById("placementOptimization"),
-    document.getElementById("placementOptimizationFloor")
-  ].filter(Boolean);
-
-  for (const select of selects) {
-    const regularOption = [...select.options].find(o => o.value === "regular");
-    if (regularOption) {
-      regularOption.hidden = isCircle;
-      regularOption.disabled = isCircle;
-    }
-
-    if (isCircle && select.value === "regular") {
-      select.value = "balanced";
-    }
+  for (const item of options) {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    select.appendChild(option);
   }
 
-  const main = document.getElementById("placementOptimization");
-  const floor = document.getElementById("placementOptimizationFloor");
-  if (main && floor) {
-    setSelectValueIfPresent(floor, main.value);
-  }
+  select.value = options.some(o => o.value === preferredValue)
+    ? preferredValue
+    : options[0].value;
 }
 
+function updatePlacementOptimizationAvailability() {
+  const shape = document.getElementById("roomShape")?.value || "rectangle";
+  const main = document.getElementById("placementOptimization");
+  const floor = document.getElementById("placementOptimizationFloor");
+  const previous = main?.value || floor?.value || "regular";
+
+  let options;
+  let preferred = previous;
+
+  if (shape === "rectangle") {
+    options = [
+      {value:"regular", label:"Pevná mřížka"}
+    ];
+    preferred = "regular";
+  } else if (shape === "circle") {
+    options = [
+      {value:"circle-aligned", label:"Zarovnaná"},
+      {value:"circle-rings", label:"Kruhová"}
+    ];
+
+    if (!["circle-aligned","circle-rings"].includes(preferred)) {
+      preferred =
+        previous === "coverage"
+          ? "circle-rings"
+          : "circle-aligned";
+    }
+  } else {
+    // L/T/U / výřezy zatím beze změny.
+    options = [
+      {value:"regular", label:"Pevná mřížka"},
+      {value:"balanced", label:"Vyvážené – geometrie i pokrytí"},
+      {value:"coverage", label:"Nejlepší pokrytí"}
+    ];
+
+    if (!options.some(o => o.value === preferred)) {
+      preferred = "balanced";
+    }
+  }
+
+  fillPlacementModeSelect(main, options, preferred);
+  fillPlacementModeSelect(floor, options, main?.value || preferred);
+}
 function updateRoomShapeUi() {
   const shape = document.getElementById("roomShape")?.value || "rectangle";
 
@@ -2934,42 +2964,6 @@ function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
   return placements;
 }
 
-function trimCirclePlacementFamilyToCount(
-  room,
-  placements,
-  desiredCount
-) {
-  if (!placements?.length || placements.length <= desiredCount) {
-    return placements?.slice() || [];
-  }
-
-  const R = room.diameterM/2;
-
-  // Odebíráme body od kraje směrem dovnitř, ale symetricky po dvojicích
-  // s podobným poloměrem a protilehlou polohou.
-  const pts = placements.map((p,index) => {
-    const xM=p.x/FEET_PER_METER;
-    const yM=p.y/FEET_PER_METER;
-    const dx=xM-R;
-    const dy=yM-R;
-    return {
-      ...p,index,
-      radius:Math.hypot(dx,dy),
-      angle:Math.atan2(dy,dx)
-    };
-  });
-
-  pts.sort((a,b) =>
-    a.radius-b.radius ||
-    a.angle-b.angle
-  );
-
-  // Pro požadovaný počet vezmeme geometricky nejvnitřnější stabilní subset.
-  // Rodiny se pro automatické doporučení netrimují; tato funkce je hlavně
-  // pro ruční override.
-  return pts.slice(0,desiredCount).map(({x,y})=>({x,y}));
-}
-
 function buildCircleCoverageDesignCandidates(room, coverage) {
   const targetSpacingM = Math.max(
     0.15,
@@ -3021,10 +3015,20 @@ function buildCircleCoverageDesignCandidates(room, coverage) {
     }));
 }
 
-function chooseCircleCoverageDesign(room, coverage) {
-  const candidates = buildCircleCoverageDesignCandidates(
+function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned") {
+  const allCandidates = buildCircleCoverageDesignCandidates(
     room,coverage
   );
+
+  const allowedFamilies =
+    circleMode === "circle-rings"
+      ? new Set(["rings-center","rings-no-center"])
+      : new Set(["rows-0","rows-45"]);
+
+  const candidates = allCandidates.filter(c =>
+    allowedFamilies.has(c.family)
+  );
+
   if (!candidates.length) return null;
 
   // Přednost má nejmenší geometrická konfigurace s prakticky plným
@@ -3054,68 +3058,6 @@ function chooseCircleCoverageDesign(room, coverage) {
     acoustic:null,
     score:0,
     source:"circle-coverage"
-  };
-}
-
-function chooseCircleLayoutForManualCount(
-  room,
-  coverage,
-  count
-) {
-  const candidates = buildCircleCoverageDesignCandidates(
-    room,coverage
-  );
-  if (!candidates.length) return null;
-
-  const variants = [];
-
-  for (const c of candidates) {
-    let placements = c.placements;
-
-    if (placements.length !== count) {
-      placements = trimCirclePlacementFamilyToCount(
-        room,placements,count
-      );
-    }
-
-    if (!placements?.length || placements.length !== count) {
-      continue;
-    }
-
-    variants.push({
-      ...c,
-      placements,
-      count,
-      designCoveragePct:circleDesignCoveragePct(
-        room,placements,coverage
-      ),
-      geometryScore:circlePlacementGeometryScore(
-        room,
-        placements,
-        Math.max(
-          0.15,
-          coverage.targetSpacing/FEET_PER_METER
-        )
-      )
-    });
-  }
-
-  if (!variants.length) return null;
-
-  const best = variants.sort((a,b)=>
-    b.designCoveragePct-a.designCoveragePct ||
-    a.geometryScore-b.geometryScore
-  )[0];
-
-  return {
-    ...best,
-    clearanceM:recommendedWallClearanceMeters(
-      coverage,room
-    ),
-    isStructuredLattice:true,
-    acoustic:null,
-    score:0,
-    source:"circle-manual"
   };
 }
 
@@ -3581,67 +3523,6 @@ function recommendSpeakerCountAndLayout(args) {
   cacheSetLimited(COUNT_RECOMMENDATION_CACHE, cacheKey, result, 48);
   return result;
 }
-function populateSpeakerCountOverrideOptions(recommendedCount, currentValue = "auto") {
-  const selects = [
-    document.getElementById("speakerCountOverride"),
-    document.getElementById("speakerCountOverrideFloor")
-  ].filter(Boolean);
-  if (!selects.length) return;
-
-  const currentNumeric =
-    currentValue !== "auto"
-      ? Math.max(1, Math.round(numValue(currentValue, 1)))
-      : null;
-
-  const maxCount = Math.min(
-    300,
-    Math.max(
-      recommendedCount + 14,
-      Math.ceil(recommendedCount * 1.7),
-      currentNumeric || 0,
-      18
-    )
-  );
-
-  for (const select of selects) {
-    select.innerHTML = "";
-
-    const auto = document.createElement("option");
-    auto.value = "auto";
-    auto.textContent =
-      `${recommendedCount} ks` &&
-      (
-        getRoomShapeConfig().shape === "circle"
-          ? `Automaticky – ${recommendedCount} ks (doporučeno pro kruh)`
-          : `Automaticky – ${recommendedCount} ks (SSC doporučeno)`
-      );
-    select.appendChild(auto);
-
-    for (let count=1; count<=maxCount; count++) {
-      const option = document.createElement("option");
-      option.value = String(count);
-      option.textContent =
-        count === recommendedCount
-          ? (
-              getRoomShapeConfig().shape === "circle"
-                ? `${count} ks – doporučeno pro kruh`
-                : `${count} ks – SSC doporučeno`
-            )
-          : `${count} ks`;
-      select.appendChild(option);
-    }
-
-    if (
-      currentValue !== "auto" &&
-      [...select.options].some(o => o.value === String(currentValue))
-    ) {
-      select.value = String(currentValue);
-    } else {
-      select.value = "auto";
-    }
-  }
-}
-
 function nearestNeighbourSpacingMeters(placements) {
   if (!placements?.length || placements.length === 1) return null;
   const values = [];
@@ -5003,8 +4884,7 @@ function calculate() {
   const tapOverride = document.getElementById("tapOverride")?.value || "auto";
   const ampPriority = document.getElementById("ampPriority")?.value || "balanced";
   const dantePreference = document.getElementById("dantePreference")?.value || "any";
-  const placementOptimizationMode = document.getElementById("placementOptimization")?.value || "balanced";
-  const speakerCountOverride = document.getElementById("speakerCountOverride")?.value || "auto";
+  const placementOptimizationMode = document.getElementById("placementOptimization")?.value || "regular";
   const pendantHeightM = speakerType === "pendant"
     ? Number(document.getElementById("pendantHeight").value)
     : 0;
@@ -5087,13 +4967,18 @@ function calculate() {
   let selectedLayout;
 
   if (room.shape === "circle") {
-    // KRUH: samostatný návrhový výpočet.
-    // Coverage diameter a overlap jsou stejné principy jako u SSC,
-    // ale počet i geometrie vznikají vyplněním kruhové místnosti
-    // skutečnými coverage footprinty.
+    // Kruh: jen dvě geometrické rodiny.
+    // Zarovnaná = striktně řady 0° nebo 45°.
+    // Kruhová = soustředné prstence, se středem nebo bez středu.
+    const circleMode =
+      placementOptimizationMode === "circle-rings"
+        ? "circle-rings"
+        : "circle-aligned";
+
     const circleDesign = chooseCircleCoverageDesign(
       room,
-      coverage
+      coverage,
+      circleMode
     );
 
     if (!circleDesign?.placements?.length) {
@@ -5102,61 +4987,9 @@ function calculate() {
     }
 
     recommendedCount = circleDesign.placements.length;
+    selectedCount = recommendedCount;
+    selectedLayout = circleDesign;
 
-    populateSpeakerCountOverrideOptions(
-      recommendedCount,
-      speakerCountOverride
-    );
-
-    selectedCount =
-      speakerCountOverride === "auto"
-        ? recommendedCount
-        : Math.max(
-            1,
-            Math.round(
-              numValue(
-                speakerCountOverride,
-                recommendedCount
-              )
-            )
-          );
-
-    if (
-      speakerCountOverride === "auto" ||
-      selectedCount === recommendedCount
-    ) {
-      selectedLayout = circleDesign;
-    } else {
-      selectedLayout = chooseCircleLayoutForManualCount(
-        room,
-        coverage,
-        selectedCount
-      );
-
-      // Pokud přímá kruhová rodina neumí přesně zadaný počet,
-      // použijeme obecný optimalizátor jako fallback.
-      if (!selectedLayout?.placements?.length) {
-        selectedLayout = selectBestLayoutForCount({
-          count:selectedCount,
-          coverage,
-          room,
-          mode:placementOptimizationMode,
-          speaker,
-          targetSPL,
-          ambientNoise,
-          useCase,
-          voltage,
-          mountingHeightFt,
-          listenerHeightFt,
-          requestedTap:tapOverride,
-          quality:"full"
-        });
-      }
-    }
-
-    // Režim optimalizace u kruhu nyní ovlivňuje hlavně případný
-    // ruční override. Automatický návrh vždy vybírá nejefektivnější
-    // geometrickou rodinu 0° / 45° / prstence se středem / bez středu.
     countRecommendation = {
       recommendedCount,
       chosen:circleDesign,
@@ -5167,11 +5000,7 @@ function calculate() {
       optimizationPolicy:null,
       circleDesignCoveragePct:circleDesign.designCoveragePct
     };
-
   } else {
-    // OBDÉLNÍK + VÝŘEZY:
-    // doporučený počet je pro všechny režimy určen SSC-style coverage
-    // výpočtem. Optimalizace mění pouze polohy.
     const sscLayout = getSscRegularAutomaticLayout(
       basePlacements,
       coverage,
@@ -5179,51 +5008,19 @@ function calculate() {
     );
 
     recommendedCount = sscLayout.placements.length;
+    selectedCount = recommendedCount;
 
-    populateSpeakerCountOverrideOptions(
-      recommendedCount,
-      speakerCountOverride
-    );
-
-    selectedCount =
-      speakerCountOverride === "auto"
-        ? recommendedCount
-        : Math.max(
-            1,
-            Math.round(
-              numValue(
-                speakerCountOverride,
-                recommendedCount
-              )
-            )
-          );
-
-    if (placementOptimizationMode === "regular") {
-      if (
-        speakerCountOverride === "auto" ||
-        selectedCount === recommendedCount
-      ) {
-        selectedLayout = sscLayout;
-      } else {
-        selectedLayout = selectBestLayoutForCount({
-          count:selectedCount,
-          coverage,
-          room,
-          mode:"regular",
-          speaker,
-          targetSPL,
-          ambientNoise,
-          useCase,
-          voltage,
-          mountingHeightFt,
-          listenerHeightFt,
-          requestedTap:tapOverride,
-          quality:"full"
-        });
-      }
+    if (
+      room.shape === "rectangle" ||
+      placementOptimizationMode === "regular"
+    ) {
+      // Obdélník je vždy jen Pevná mřížka.
+      selectedLayout = sscLayout;
     } else {
+      // Výřezy zatím necháváme v dosavadním režimu,
+      // ale počet už uživatel ručně nemění.
       selectedLayout = selectBestLayoutForCount({
-        count:selectedCount,
+        count:recommendedCount,
         coverage,
         room,
         mode:placementOptimizationMode,
@@ -5238,10 +5035,7 @@ function calculate() {
         quality:"full"
       });
 
-      if (
-        !selectedLayout?.placements?.length &&
-        selectedCount === recommendedCount
-      ) {
+      if (!selectedLayout?.placements?.length) {
         selectedLayout = sscLayout;
       }
     }
@@ -5414,6 +5208,8 @@ function calculate() {
 
   const optimizationModeLabels = {
     regular: "Pevná mřížka – striktní X/Y",
+    "circle-aligned": "Zarovnaná – řady 0° / 45°",
+    "circle-rings": "Kruhová – soustředné prstence",
     balanced: "Vyvážené – vždy geometrická síť",
     coverage: "Nejlepší pokrytí – volná optimalizace"
   };
@@ -5468,9 +5264,7 @@ function calculate() {
       : `${recommendedCount} ks – SSC coverage`;
 
   document.getElementById("technicalSelectedCountValue").textContent =
-    speakerCountOverride === "auto"
-      ? `${effectiveCoverage.count} ks – automaticky`
-      : `${effectiveCoverage.count} ks – ručně`;
+    `${effectiveCoverage.count} ks – automatický návrh`;
 
   document.getElementById("technicalWallClearanceValue").textContent =
     `${placementOptimization.clearanceM.toFixed(2).replace(".", ",")} m`;
@@ -5544,15 +5338,9 @@ function calculate() {
 populateSpeakerOverrideOptions();
 
 document.getElementById("speakerOverride").addEventListener("change", calculate);
-document.getElementById("speakerCountOverride")?.addEventListener("change", () => {
-  const floor = document.getElementById("speakerCountOverrideFloor");
-  if (floor) floor.value = document.getElementById("speakerCountOverride").value;
-  calculate();
-});
-
-document.getElementById("speakerCountOverrideFloor")?.addEventListener("change", () => {
-  const main = document.getElementById("speakerCountOverride");
-  const floor = document.getElementById("speakerCountOverrideFloor");
+document.getElementById("coverageDensityFloor")?.addEventListener("change", () => {
+  const main = document.getElementById("coverageDensity");
+  const floor = document.getElementById("coverageDensityFloor");
   if (main && floor) main.value = floor.value;
   calculate();
 });
@@ -5561,7 +5349,6 @@ document.getElementById("placementOptimizationFloor")?.addEventListener("change"
   const main = document.getElementById("placementOptimization");
   const floor = document.getElementById("placementOptimizationFloor");
   if (main && floor) main.value = floor.value;
-  updatePlacementOptimizationAvailability();
   calculate();
 });
 
@@ -5695,8 +5482,7 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (id === "secondCutEnabled") updateRoomShapeUi();
-      if (id === "placementOptimization") {
-        updatePlacementOptimizationAvailability();
+      if (id === "placementOptimization" || id === "coverageDensity") {
         syncFloorControlsFromMain();
       }
       if (["length","width","lCutSide","lCutWidth","lCutLength","lCutOffset","secondCutEnabled","lCutSide2","lCutWidth2","lCutLength2","lCutOffset2","diameter"].includes(id)) {
