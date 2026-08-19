@@ -1,4 +1,4 @@
-const APP_VERSION = "0.117";
+const APP_VERSION = "0.118";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2892,6 +2892,77 @@ function coverageLayoutMeetsNearOptimalThreshold(layout, referenceAcoustic, targ
 }
 
 
+
+function getDynamicOptimizationPolicy(coverage) {
+  const toleranceDb = Number(coverage?.expectedSPLVariation) || 3;
+
+  // Čím přísnější požadavek na rovnoměrnost, tím více tolerujeme
+  // vyšší počet reproduktorů. U volnějšího overlapu naopak výrazně
+  // preferujeme úspornější návrh.
+  const presets = {
+    1: {
+      preferredCoveragePct: 97,
+      fallbackCoveragePct: 93,
+      maxCountIncreaseRatio: 0.35,
+      meaningfulToleranceGainPct: 1.0,
+      meaningfulSpreadGainDb: 0.7,
+      meaningfulMinGainDb: 0.7,
+      strongToleranceGainPct: 2.0,
+      strongSpreadGainDb: 1.1
+    },
+    2: {
+      preferredCoveragePct: 97,
+      fallbackCoveragePct: 94,
+      maxCountIncreaseRatio: 0.30,
+      meaningfulToleranceGainPct: 1.2,
+      meaningfulSpreadGainDb: 0.8,
+      meaningfulMinGainDb: 0.8,
+      strongToleranceGainPct: 2.2,
+      strongSpreadGainDb: 1.2
+    },
+    3: {
+      preferredCoveragePct: 98,
+      fallbackCoveragePct: 95,
+      maxCountIncreaseRatio: 0.24,
+      meaningfulToleranceGainPct: 1.5,
+      meaningfulSpreadGainDb: 0.9,
+      meaningfulMinGainDb: 0.9,
+      strongToleranceGainPct: 2.5,
+      strongSpreadGainDb: 1.3
+    },
+    4: {
+      preferredCoveragePct: 98,
+      fallbackCoveragePct: 95,
+      maxCountIncreaseRatio: 0.18,
+      meaningfulToleranceGainPct: 2.0,
+      meaningfulSpreadGainDb: 1.0,
+      meaningfulMinGainDb: 1.0,
+      strongToleranceGainPct: 3.0,
+      strongSpreadGainDb: 1.5
+    },
+    7: {
+      preferredCoveragePct: 98,
+      fallbackCoveragePct: 95,
+      maxCountIncreaseRatio: 0.12,
+      meaningfulToleranceGainPct: 3.0,
+      meaningfulSpreadGainDb: 1.3,
+      meaningfulMinGainDb: 1.3,
+      strongToleranceGainPct: 4.0,
+      strongSpreadGainDb: 1.8
+    }
+  };
+
+  const keys = Object.keys(presets).map(Number);
+  const nearest = keys
+    .slice()
+    .sort((a,b) => Math.abs(a-toleranceDb)-Math.abs(b-toleranceDb))[0];
+
+  return {
+    toleranceDb,
+    ...(presets[nearest] || presets[3])
+  };
+}
+
 function sortUniqueLayoutsByCount(layouts) {
   const bestByCount = new Map();
   for (const item of layouts || []) {
@@ -2902,10 +2973,10 @@ function sortUniqueLayoutsByCount(layouts) {
   return [...bestByCount.values()].sort((a,b) => a.count - b.count);
 }
 
-function balancedSimpleAccepts(layout, targetSPL) {
+function balancedSimpleAccepts(layout, targetSPL, policy) {
   if (!layout?.isStructuredLattice || !layout?.acoustic) return false;
   return (
-    layout.acoustic.tolerancePct >= 98 &&
+    layout.acoustic.tolerancePct >= policy.preferredCoveragePct &&
     layout.acoustic.average >= targetSPL - 1.5 &&
     layout.acoustic.min >= targetSPL - 7 &&
     layout.acoustic.largestHolePct <= 2.5 &&
@@ -2913,10 +2984,10 @@ function balancedSimpleAccepts(layout, targetSPL) {
   );
 }
 
-function balancedFallbackAccepts(layout, targetSPL) {
+function balancedFallbackAccepts(layout, targetSPL, policy) {
   if (!layout?.isStructuredLattice || !layout?.acoustic) return false;
   return (
-    layout.acoustic.tolerancePct >= 95 &&
+    layout.acoustic.tolerancePct >= policy.fallbackCoveragePct &&
     layout.acoustic.average >= targetSPL - 1.5 &&
     layout.acoustic.min >= targetSPL - 7 &&
     layout.acoustic.largestHolePct <= 3.5 &&
@@ -2924,12 +2995,12 @@ function balancedFallbackAccepts(layout, targetSPL) {
   );
 }
 
-function significantBalancedImprovement(smaller, larger) {
+function significantBalancedImprovement(smaller, larger, policy) {
   if (!smaller?.acoustic || !larger?.acoustic) return false;
   return (
-    larger.acoustic.tolerancePct - smaller.acoustic.tolerancePct >= 2.0 ||
-    smaller.acoustic.spread - larger.acoustic.spread >= 1.0 ||
-    larger.acoustic.min - smaller.acoustic.min >= 1.0
+    larger.acoustic.tolerancePct - smaller.acoustic.tolerancePct >= policy.meaningfulToleranceGainPct ||
+    smaller.acoustic.spread - larger.acoustic.spread >= policy.meaningfulSpreadGainDb ||
+    larger.acoustic.min - smaller.acoustic.min >= policy.meaningfulMinGainDb
   );
 }
 
@@ -2939,39 +3010,40 @@ function coverageSimpleQuality(layout) {
   return a.tolerancePct * 2.0 - a.spread * 1.2 - a.largestHolePct * 3.0;
 }
 
-function coverageSimpleAccepts(layout, targetSPL) {
+function coverageSimpleAccepts(layout, targetSPL, policy) {
   const a = layout?.freeAcoustic || layout?.acoustic;
   if (!a) return false;
   return (
-    a.tolerancePct >= 98 &&
+    a.tolerancePct >= policy.preferredCoveragePct &&
     a.average >= targetSPL - 1.5 &&
     a.min >= targetSPL - 7
   );
 }
 
-function coverageFallbackAccepts(layout, targetSPL) {
+function coverageFallbackAccepts(layout, targetSPL, policy) {
   const a = layout?.freeAcoustic || layout?.acoustic;
   if (!a) return false;
   return (
-    a.tolerancePct >= 95 &&
+    a.tolerancePct >= policy.fallbackCoveragePct &&
     a.average >= targetSPL - 1.5 &&
     a.min >= targetSPL - 7
   );
 }
 
-function significantCoverageImprovement(smaller, larger) {
+function significantCoverageImprovement(smaller, larger, policy) {
   const a = smaller?.freeAcoustic || smaller?.acoustic;
   const b = larger?.freeAcoustic || larger?.acoustic;
   if (!a || !b) return false;
   return (
-    b.tolerancePct - a.tolerancePct >= 2.0 ||
-    a.spread - b.spread >= 1.0 ||
-    b.min - a.min >= 1.0
+    b.tolerancePct - a.tolerancePct >= policy.meaningfulToleranceGainPct ||
+    a.spread - b.spread >= policy.meaningfulSpreadGainDb ||
+    b.min - a.min >= policy.meaningfulMinGainDb
   );
 }
 
 function recommendSpeakerCountAndLayout(args) {
-  const cacheKey = `v117;${recommendationCacheKey(args)}`;
+  const policy = getDynamicOptimizationPolicy(args.coverage);
+  const cacheKey = `v118;${recommendationCacheKey(args)};policy=${policy.toleranceDb}`;
   const cached = COUNT_RECOMMENDATION_CACHE.get(cacheKey);
   if (cached) return cached;
 
@@ -2990,42 +3062,59 @@ function recommendSpeakerCountAndLayout(args) {
   if (!evaluated.length) return null;
   const ordered = sortUniqueLayoutsByCount(evaluated);
 
+  // ----------------------------------------------------------
+  // VYVÁŽENÉ
+  // ----------------------------------------------------------
   if (args.mode === "balanced") {
-    const strong = ordered.filter(x => balancedSimpleAccepts(x, args.targetSPL));
+    const strong = ordered.filter(x =>
+      balancedSimpleAccepts(x, args.targetSPL, policy)
+    );
+
     let chosen;
 
     if (strong.length) {
       chosen = strong[0];
+
       for (const candidate of strong.slice(1)) {
-        if (!significantBalancedImprovement(chosen, candidate)) continue;
+        if (!significantBalancedImprovement(chosen, candidate, policy)) continue;
 
         const countIncrease =
           (candidate.count - chosen.count) / Math.max(1, chosen.count);
+
         const toleranceGain =
           candidate.acoustic.tolerancePct - chosen.acoustic.tolerancePct;
+
         const spreadGain =
           chosen.acoustic.spread - candidate.acoustic.spread;
 
+        // Dynamika overlapu:
+        // ±1/2 dB dovolí vyšší počet snáz.
+        // ±4/7 dB musí vyšší počet prokázat výrazně větší přínos.
         if (
-          countIncrease <= 0.20 ||
-          toleranceGain >= 3.0 ||
-          spreadGain >= 1.5
+          countIncrease <= policy.maxCountIncreaseRatio ||
+          toleranceGain >= policy.strongToleranceGainPct ||
+          spreadGain >= policy.strongSpreadGainDb
         ) {
           chosen = candidate;
         }
       }
     } else {
       const fallback = ordered.filter(x =>
-        balancedFallbackAccepts(x, args.targetSPL)
+        balancedFallbackAccepts(x, args.targetSPL, policy)
       );
 
       if (fallback.length) {
         chosen = fallback[0];
+
         for (const candidate of fallback.slice(1)) {
-          if (!significantBalancedImprovement(chosen, candidate)) continue;
+          if (!significantBalancedImprovement(chosen, candidate, policy)) continue;
+
           const countIncrease =
             (candidate.count - chosen.count) / Math.max(1, chosen.count);
-          if (countIncrease <= 0.20) chosen = candidate;
+
+          if (countIncrease <= policy.maxCountIncreaseRatio) {
+            chosen = candidate;
+          }
         }
       } else {
         chosen = ordered
@@ -3043,8 +3132,9 @@ function recommendSpeakerCountAndLayout(args) {
       recommendedCount:chosen.count,
       chosen,
       evaluated:ordered,
-      toleranceFloor:98,
-      targetMet:balancedSimpleAccepts(chosen, args.targetSPL),
+      toleranceFloor:policy.preferredCoveragePct,
+      targetMet:balancedSimpleAccepts(chosen, args.targetSPL, policy),
+      optimizationPolicy:policy,
       balancedQuality:{
         largestHolePct:chosen.acoustic.largestHolePct,
         spacingBalanceRatio:chosen.acoustic.spacingBalanceRatio
@@ -3055,42 +3145,55 @@ function recommendSpeakerCountAndLayout(args) {
     return result;
   }
 
-  const strong = ordered.filter(x => coverageSimpleAccepts(x, args.targetSPL));
+  // ----------------------------------------------------------
+  // NEJLEPŠÍ POKRYTÍ
+  // ----------------------------------------------------------
+  const strong = ordered.filter(x =>
+    coverageSimpleAccepts(x, args.targetSPL, policy)
+  );
+
   let chosen;
 
   if (strong.length) {
     chosen = strong[0];
+
     for (const candidate of strong.slice(1)) {
-      if (!significantCoverageImprovement(chosen, candidate)) continue;
+      if (!significantCoverageImprovement(chosen, candidate, policy)) continue;
 
       const countIncrease =
         (candidate.count - chosen.count) / Math.max(1, chosen.count);
 
       const a = chosen.freeAcoustic || chosen.acoustic;
       const b = candidate.freeAcoustic || candidate.acoustic;
+
       const toleranceGain = b.tolerancePct - a.tolerancePct;
       const spreadGain = a.spread - b.spread;
 
       if (
-        countIncrease <= 0.20 ||
-        toleranceGain >= 3.0 ||
-        spreadGain >= 1.5
+        countIncrease <= policy.maxCountIncreaseRatio ||
+        toleranceGain >= policy.strongToleranceGainPct ||
+        spreadGain >= policy.strongSpreadGainDb
       ) {
         chosen = candidate;
       }
     }
   } else {
     const fallback = ordered.filter(x =>
-      coverageFallbackAccepts(x, args.targetSPL)
+      coverageFallbackAccepts(x, args.targetSPL, policy)
     );
 
     if (fallback.length) {
       chosen = fallback[0];
+
       for (const candidate of fallback.slice(1)) {
-        if (!significantCoverageImprovement(chosen, candidate)) continue;
+        if (!significantCoverageImprovement(chosen, candidate, policy)) continue;
+
         const countIncrease =
           (candidate.count - chosen.count) / Math.max(1, chosen.count);
-        if (countIncrease <= 0.20) chosen = candidate;
+
+        if (countIncrease <= policy.maxCountIncreaseRatio) {
+          chosen = candidate;
+        }
       }
     } else {
       chosen = ordered
@@ -3106,8 +3209,9 @@ function recommendSpeakerCountAndLayout(args) {
     recommendedCount:chosen.count,
     chosen,
     evaluated:ordered,
-    toleranceFloor:98,
-    targetMet:coverageSimpleAccepts(chosen, args.targetSPL)
+    toleranceFloor:policy.preferredCoveragePct,
+    targetMet:coverageSimpleAccepts(chosen, args.targetSPL, policy),
+    optimizationPolicy:policy
   };
 
   cacheSetLimited(COUNT_RECOMMENDATION_CACHE, cacheKey, result, 48);
@@ -4824,8 +4928,10 @@ function calculate() {
   } else {
     document.getElementById("technicalToleranceAreaValue").textContent =
       `${splTolerancePct.toFixed(0)} %${countRecommendation.targetMet ? "" : " • maximum nalezené"}`;
+    const dynamicPolicy = countRecommendation.optimizationPolicy ||
+      getDynamicOptimizationPolicy(coverage);
     document.getElementById("technicalToleranceGoalValue").textContent =
-      `≥ 98 % simulované plochy v ±${toleranceDb} dB`;
+      `≥ ${dynamicPolicy.preferredCoveragePct} % simulované plochy v ±${toleranceDb} dB • max. běžný nárůst počtu ${(dynamicPolicy.maxCountIncreaseRatio*100).toFixed(0)} %`;
   }
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
