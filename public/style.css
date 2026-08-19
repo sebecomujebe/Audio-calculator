@@ -2079,3 +2079,56 @@ input[type="number"]::-webkit-outer-spin-button {
     margin-top: 2px !important;
   }
 }
+
+
+/* v0.107 – proporčně kompaktní panel, ale ne namačkaný */
+@media (min-width: 980px) {
+  .compact-form-panel > label:not(.second-cut-toggle),
+  .compact-form-panel #roomDimensionsGrid > label,
+  .compact-form-panel .compact-grid-2 > label,
+  .compact-form-panel .cutout-compact-grid > label,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) {
+    min-height: 30px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .compact-form-panel #roomDimensionsGrid,
+  .compact-form-panel .grid-2,
+  .compact-form-panel .compact-grid-2,
+  .compact-form-panel .cutout-compact-grid,
+  .compact-form-panel .circle-dimensions-grid:not(.hidden) {
+    row-gap: 3px !important;
+  }
+
+  .compact-form-panel .room-shape-row,
+  .compact-form-panel .placement-optimization-row {
+    margin-bottom: 3px !important;
+  }
+
+  .compact-form-panel input,
+  .compact-form-panel select {
+    min-height: 29px !important;
+    height: 29px !important;
+  }
+
+  .compact-form-panel .field-with-unit {
+    min-height: 29px !important;
+    height: 29px !important;
+  }
+
+  .compact-form-panel .cutout-card {
+    margin: 3px 0 !important;
+  }
+}
+
+/* Jednotka m je pomocná informace, proto má menší vizuální váhu. */
+.field-with-unit > span:last-child {
+  font-size: 0.76em !important;
+  font-weight: 700 !important;
+  opacity: .82;
+  min-width: 28px;
+}
+
+.count-selector-wrap {
+  min-width: 205px;
+}

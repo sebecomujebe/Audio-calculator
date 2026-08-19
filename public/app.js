@@ -1,4 +1,4 @@
-const APP_VERSION = "0.106"; // boundary patch: corner cutouts
+const APP_VERSION = "0.107";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -983,17 +983,42 @@ function placementGeometryScore(placements, room, samples = null, clearanceM = 0
   const max = distances[distances.length - 1];
 
   let wallPenalty = 0;
-  if (clearanceM > 0) {
-    for (const p of pts) {
-      const d = distanceToRoomBoundaryMeters(p.xM, p.yM, room);
-      if (d < clearanceM) {
-        wallPenalty += Math.pow((clearanceM - d) / clearanceM, 2);
-      }
+  const wallDistances = [];
+  for (const p of pts) {
+    const d = distanceToRoomBoundaryMeters(p.xM, p.yM, room);
+    wallDistances.push(d);
+    if (clearanceM > 0 && d < clearanceM) {
+      wallPenalty += Math.pow((clearanceM - d) / clearanceM, 2);
     }
-    wallPenalty /= Math.max(1, pts.length);
+  }
+  wallPenalty /= Math.max(1, pts.length);
+
+  // Vyvážení vůči skutečné ploše místnosti. To je důležité zejména u L/U
+  // půdorysů: sestava se nesmí bez důvodu přitlačit k jedné stěně.
+  const roomCx = testPoints.reduce((s,p) => s+p.xM, 0) / testPoints.length;
+  const roomCy = testPoints.reduce((s,p) => s+p.yM, 0) / testPoints.length;
+  const speakerCx = pts.reduce((s,p) => s+p.xM, 0) / pts.length;
+  const speakerCy = pts.reduce((s,p) => s+p.yM, 0) / pts.length;
+  const diag = Math.max(0.1, Math.hypot(room.widthM, room.lengthM));
+  const centroidPenalty = Math.hypot(speakerCx-roomCx, speakerCy-roomCy) / diag;
+
+  let wallBalancePenalty = 0;
+  if (wallDistances.length > 1) {
+    const wallMean = wallDistances.reduce((a,b)=>a+b,0) / wallDistances.length;
+    const wallStd = Math.sqrt(
+      wallDistances.reduce((s,d)=>s+Math.pow(d-wallMean,2),0) / wallDistances.length
+    );
+    wallBalancePenalty = wallStd / Math.max(0.5, Math.min(room.widthM, room.lengthM));
   }
 
-  return max * 0.52 + p90 * 0.28 + std * 0.12 + wallPenalty * 1.8;
+  return (
+    max * 0.48 +
+    p90 * 0.27 +
+    std * 0.10 +
+    wallPenalty * 1.9 +
+    centroidPenalty * 2.2 +
+    wallBalancePenalty * 0.55
+  );
 }
 
 function generateAlignedGridWithOffset(coverage, room, shiftXFt, shiftYFt, clearanceM) {
@@ -1233,102 +1258,330 @@ function blendPlacements(regular, optimized, room, blend, clearanceM) {
   });
 }
 
-function optimizePlacementsForRoom(basePlacements, coverage, room, mode = "balanced") {
-  const base = basePlacements.map(p => ({...p}));
-  const clearanceM = recommendedWallClearanceMeters(coverage, room);
 
-  if (!base.length || room.shape === "rectangle") {
-    return {
-      placements: base,
-      optimized: false,
-      method: "Pravidelná mřížka",
-      improvementPct: 0,
-      clearanceM
-    };
-  }
-
-  const samples = makeOptimizationSamples(room);
-  const baseScore = placementGeometryScore(base, room, samples, clearanceM);
-
-  // Circle uses its own symmetry-preserving optimizer.
-  if (room.shape === "circle") {
-    const regular = generateCircularRingPlacements(base.length, room, clearanceM);
-    const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
-
-    if (mode === "regular") {
-      return {
-        placements: regular,
-        optimized: false,
-        method: "Pravidelné centrované rozmístění",
-        improvementPct: baseScore > 0 ? Math.max(0, (baseScore - regularScore) / baseScore * 100) : 0,
-        clearanceM
-      };
+function dedupePlacements(points, minDistanceM = 0.12) {
+  const out = [];
+  for (const p of points || []) {
+    const xM = p.x / FEET_PER_METER;
+    const yM = p.y / FEET_PER_METER;
+    if (out.every(q => Math.hypot(q.x/FEET_PER_METER-xM, q.y/FEET_PER_METER-yM) >= minDistanceM)) {
+      out.push(p);
     }
-
-    const radiusOptimized = optimizeCircularRadius(regular, room, clearanceM, samples);
-    const optimizedScore = placementGeometryScore(radiusOptimized, room, samples, clearanceM);
-
-    if (mode === "balanced") {
-      // Balanced in a circle never breaks symmetry. It only adjusts ring radius.
-      return {
-        placements: radiusOptimized,
-        optimized: true,
-        method: "Vyvážené centrované rozmístění",
-        improvementPct: regularScore > 0 ? Math.max(0, (regularScore - optimizedScore) / regularScore * 100) : 0,
-        clearanceM
-      };
-    }
-
-    // Coverage mode may use a slightly broader radial search, but still
-    // preserves the centroid and the ring structure.
-    const coverageOptimized = optimizeCircularRadius(radiusOptimized, room, clearanceM * 0.85, samples);
-    const coverageScore = placementGeometryScore(coverageOptimized, room, samples, clearanceM * 0.85);
-
-    return {
-      placements: coverageOptimized,
-      optimized: true,
-      method: "Centrované rozmístění pro nejlepší pokrytí",
-      improvementPct: regularScore > 0 ? Math.max(0, (regularScore - coverageScore) / regularScore * 100) : 0,
-      clearanceM
-    };
   }
+  return out;
+}
 
-  // L-shaped rooms keep the grid/alignment logic.
-  const regular = generateRegularLPlacements(base, coverage, room, clearanceM);
-  const regularScore = placementGeometryScore(regular, room, samples, clearanceM);
-
-  if (mode === "regular") {
-    return {
-      placements: regular,
-      optimized: false,
-      method: "Pravidelné zarovnání L",
-      improvementPct: baseScore > 0 ? Math.max(0, (baseScore - regularScore) / baseScore * 100) : 0,
-      clearanceM
-    };
-  }
-
-  const coverageCandidate = relaxPlacements(regular, room, 6, 0.60, clearanceM);
-  const coverageScore = placementGeometryScore(coverageCandidate, room, samples, clearanceM);
-
-  if (mode === "balanced") {
-    const balanced = blendPlacements(regular, coverageCandidate, room, 0.35, clearanceM);
-    const balancedScore = placementGeometryScore(balanced, room, samples, clearanceM);
-
-    return {
-      placements: balanced,
-      optimized: true,
-      method: "Vyvážené rozmístění L",
-      improvementPct: regularScore > 0 ? Math.max(0, (regularScore - balancedScore) / regularScore * 100) : 0,
-      clearanceM
-    };
-  }
-
+function rotatePointMeters(xM, yM, cx, cy, angleRad) {
+  const dx = xM - cx;
+  const dy = yM - cy;
   return {
-    placements: coverageCandidate,
-    optimized: true,
-    method: "Optimalizované pokrytí L",
-    improvementPct: regularScore > 0 ? Math.max(0, (regularScore - coverageScore) / regularScore * 100) : 0,
-    clearanceM
+    xM: cx + dx*Math.cos(angleRad) - dy*Math.sin(angleRad),
+    yM: cy + dx*Math.sin(angleRad) + dy*Math.cos(angleRad)
+  };
+}
+
+function chooseSpreadSubset(points, count, room, samples = null) {
+  if (points.length <= count) return points.slice(0, count);
+  const testPoints = samples || makeOptimizationSamples(room, 500);
+  const roomCx = testPoints.reduce((s,p)=>s+p.xM,0)/testPoints.length;
+  const roomCy = testPoints.reduce((s,p)=>s+p.yM,0)/testPoints.length;
+
+  const remaining = points.map(p => ({...p}));
+  const selected = [];
+  let firstIndex = 0;
+  let firstDist = Infinity;
+  remaining.forEach((p,i) => {
+    const d = Math.hypot(p.x/FEET_PER_METER-roomCx, p.y/FEET_PER_METER-roomCy);
+    if (d < firstDist) { firstDist=d; firstIndex=i; }
+  });
+  selected.push(remaining.splice(firstIndex,1)[0]);
+
+  while (selected.length < count && remaining.length) {
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+    remaining.forEach((p,i) => {
+      const xM=p.x/FEET_PER_METER, yM=p.y/FEET_PER_METER;
+      const nearest = Math.min(...selected.map(q =>
+        Math.hypot(q.x/FEET_PER_METER-xM, q.y/FEET_PER_METER-yM)
+      ));
+      const wall = distanceToRoomBoundaryMeters(xM,yM,room);
+      const score = nearest + Math.min(wall,1.5)*0.12;
+      if (score > bestScore) {bestScore=score; bestIndex=i;}
+    });
+    selected.push(remaining.splice(bestIndex,1)[0]);
+  }
+  return selected;
+}
+
+function makeGridCandidateForCount(count, room, clearanceM, angleDeg = 0, stagger = false, aspectBias = 1) {
+  if (count <= 0) return [];
+  const samples = makeOptimizationSamples(room, 550);
+  const roomCx = samples.reduce((s,p)=>s+p.xM,0)/samples.length;
+  const roomCy = samples.reduce((s,p)=>s+p.yM,0)/samples.length;
+  const aspect = (room.widthM / Math.max(0.1, room.lengthM)) * aspectBias;
+
+  let best = [];
+  let bestScore = Infinity;
+
+  const approxCols = Math.max(1, Math.round(Math.sqrt(count * aspect)));
+  for (let cols = Math.max(1, approxCols-3); cols <= approxCols+3; cols++) {
+    const rows = Math.max(1, Math.ceil(count / cols));
+    for (const marginFactor of [0.45,0.55,0.65]) {
+      const marginX = Math.min(room.widthM*0.22, Math.max(clearanceM, room.widthM/(cols+1)*marginFactor));
+      const marginY = Math.min(room.lengthM*0.22, Math.max(clearanceM, room.lengthM/(rows+1)*marginFactor));
+      const spanX = Math.max(0.1, room.widthM - 2*marginX);
+      const spanY = Math.max(0.1, room.lengthM - 2*marginY);
+      const dx = cols > 1 ? spanX/(cols-1) : 0;
+      const dy = rows > 1 ? spanY/(rows-1) : 0;
+
+      let lattice = [];
+      for (let r=0; r<rows; r++) {
+        const rowShift = stagger && cols > 1 && r%2 ? dx*0.5 : 0;
+        for (let c=0; c<cols; c++) {
+          let xM = cols===1 ? roomCx : marginX + c*dx + rowShift;
+          let yM = rows===1 ? roomCy : marginY + r*dy;
+          let rp = rotatePointMeters(xM,yM,roomCx,roomCy,angleDeg*Math.PI/180);
+          if (!isPointInsideRoomMeters(rp.xM,rp.yM,room)) continue;
+          if (distanceToRoomBoundaryMeters(rp.xM,rp.yM,room) < clearanceM*0.78) continue;
+          lattice.push({x:rp.xM*FEET_PER_METER,y:rp.yM*FEET_PER_METER});
+        }
+      }
+
+      lattice = dedupePlacements(lattice);
+      if (lattice.length < count) continue;
+      const candidate = chooseSpreadSubset(lattice,count,room,samples);
+      const score = placementGeometryScore(candidate,room,samples,clearanceM);
+      if (score < bestScore) { bestScore=score; best=candidate; }
+    }
+  }
+  return best;
+}
+
+function makeRadialCandidateForCount(count, room, clearanceM) {
+  if (room.shape !== "circle" || count <= 0) return [];
+  const r = room.diameterM/2;
+  const cx=r, cy=r;
+  const usableR=Math.max(0.15,r-clearanceM);
+  if (count===1) return [{x:cx*FEET_PER_METER,y:cy*FEET_PER_METER}];
+
+  const points=[];
+  const golden=Math.PI*(3-Math.sqrt(5));
+  for (let i=0;i<count;i++) {
+    const rr = usableR*0.82*Math.sqrt((i+0.5)/count);
+    const a=i*golden;
+    points.push({x:(cx+rr*Math.cos(a))*FEET_PER_METER,y:(cy+rr*Math.sin(a))*FEET_PER_METER});
+  }
+  return points;
+}
+
+
+function makeDenseAlignedFallback(count, room, clearanceM) {
+  const samples=makeOptimizationSamples(room,600);
+  const aspect=room.widthM/Math.max(0.1,room.lengthM);
+  const cols=Math.max(2,Math.ceil(Math.sqrt(count*aspect)*2.1));
+  const rows=Math.max(2,Math.ceil(Math.sqrt(count/Math.max(0.1,aspect))*2.1));
+  const points=[];
+  for(let r=0;r<rows;r++){
+    const yM=room.lengthM*(r+0.5)/rows;
+    for(let c=0;c<cols;c++){
+      const xM=room.widthM*(c+0.5)/cols;
+      if(!isPointInsideRoomMeters(xM,yM,room)) continue;
+      if(distanceToRoomBoundaryMeters(xM,yM,room)<clearanceM*0.72) continue;
+      points.push({x:xM*FEET_PER_METER,y:yM*FEET_PER_METER});
+    }
+  }
+  if(points.length<count){
+    for(const s of samples){
+      if(points.length>=count*3) break;
+      if(distanceToRoomBoundaryMeters(s.xM,s.yM,room)<clearanceM*0.55) continue;
+      points.push({x:s.xM*FEET_PER_METER,y:s.yM*FEET_PER_METER});
+    }
+  }
+  return chooseSpreadSubset(dedupePlacements(points),count,room,samples);
+}
+
+function layoutCandidatesForCount(count, coverage, room, mode) {
+  const clearanceM = recommendedWallClearanceMeters(coverage,room);
+  const candidates=[];
+
+  const add=(points,method,alignmentRank=0)=>{
+    if (!points || points.length!==count) return;
+    candidates.push({placements:points,method,alignmentRank,clearanceM});
+  };
+
+  // Striktní režim: pouze osy X/Y.
+  add(makeGridCandidateForCount(count,room,clearanceM,0,false,1),"Pravidelná mřížka X/Y",3);
+
+  if (mode !== "regular") {
+    add(makeGridCandidateForCount(count,room,clearanceM,0,true,1),"Posunuté zarovnané řady",2);
+    add(makeGridCandidateForCount(count,room,clearanceM,45,false,1),"Mřížka otočená 45°",2);
+    add(makeGridCandidateForCount(count,room,clearanceM,-45,false,1),"Mřížka otočená −45°",2);
+    add(makeGridCandidateForCount(count,room,clearanceM,0,false,0.75),"Dynamicky zarovnaná mřížka",2);
+    add(makeGridCandidateForCount(count,room,clearanceM,0,false,1.35),"Dynamicky zarovnaná mřížka",2);
+
+    if (room.shape==="circle") {
+      const radial = generateCircularRingPlacements(count,room,clearanceM);
+      add(radial,"Kruhově zarovnané rozmístění",2);
+    }
+  }
+
+  if (mode === "coverage") {
+    const seeds = candidates.map(c=>c.placements);
+    if (room.shape==="circle") seeds.push(makeRadialCandidateForCount(count,room,clearanceM));
+    for (const seed of seeds) {
+      if (!seed || seed.length!==count) continue;
+      const free = relaxPlacements(seed,room,9,0.78,clearanceM*0.75);
+      add(free,"Volná optimalizace pokrytí",0);
+    }
+  }
+
+  if (!candidates.length) {
+    const fallback=makeDenseAlignedFallback(count,room,clearanceM);
+    add(
+      mode==="coverage" && fallback.length===count
+        ? relaxPlacements(fallback,room,8,0.76,clearanceM*0.75)
+        : fallback,
+      mode==="coverage" ? "Volná optimalizace pokrytí" : "Pravidelná mřížka X/Y",
+      mode==="regular" ? 3 : 1
+    );
+  }
+  return candidates;
+}
+
+function quickPlacementAcousticMetrics({placements,room,mountingHeightFt,listenerHeightFt,speaker,tap,targetSPL}) {
+  const samples=makeOptimizationSamples(room,520);
+  const values=samples.map(s=>calculateSPLAtPoint({
+    xFt:s.xM*FEET_PER_METER,
+    yFt:s.yM*FEET_PER_METER,
+    listenerHeightFt,
+    placements,
+    mountingHeightFt,
+    speaker,
+    tap
+  }));
+  if (!values.length) return {average:0,min:0,max:0,spread:Infinity,tolerancePct:0,targetDeficit:Infinity};
+  const linear=values.reduce((sum,v)=>sum+Math.pow(10,v/10),0);
+  const average=10*Math.log10(linear/values.length);
+  const min=Math.min(...values), max=Math.max(...values);
+  const tolerancePct=values.filter(v=>Math.abs(v-average)<=3).length/values.length*100;
+  return {
+    average,min,max,spread:max-min,tolerancePct,
+    targetDeficit:Math.max(0,targetSPL-average)
+  };
+}
+
+function chooseBestLayoutForCount({
+  count,coverage,room,mode,speaker,targetSPL,ambientNoise,useCase,voltage,
+  mountingHeightFt,listenerHeightFt
+}) {
+  const candidates=layoutCandidatesForCount(count,coverage,room,mode);
+  if (!candidates.length) return null;
+
+  const effectiveCoverage={...coverage,count};
+  const power=calculatePower({speaker,targetSPL,ambientNoise,useCase,voltage},effectiveCoverage);
+  const tap=power.recommendedTap;
+  let best=null;
+
+  for (const c of candidates) {
+    const acoustic=quickPlacementAcousticMetrics({
+      placements:c.placements,room,mountingHeightFt,listenerHeightFt,speaker,tap,targetSPL
+    });
+    const geometry=placementGeometryScore(c.placements,room,null,c.clearanceM);
+
+    // Režimy mají odlišné priority.
+    let score;
+    if (mode==="regular") {
+      score = acoustic.tolerancePct - acoustic.spread*1.2 - acoustic.targetDeficit*5 - geometry*2.0;
+    } else if (mode==="balanced") {
+      score = acoustic.tolerancePct*1.05 - acoustic.spread*1.45 - acoustic.targetDeficit*5 - geometry*1.45 + c.alignmentRank*1.6;
+    } else {
+      score = acoustic.tolerancePct*1.25 - acoustic.spread*1.75 - acoustic.targetDeficit*6 - geometry*0.75;
+    }
+    if (!best || score>best.score) best={...c,acoustic,score,tap};
+  }
+  return best;
+}
+
+function candidateCountsAround(baseCount) {
+  const base=Math.max(1,Math.round(baseCount));
+  const values=new Set();
+  if (base<=24) {
+    for (let n=Math.max(1,Math.floor(base*0.5)); n<=Math.ceil(base*1.35)+2; n++) values.add(n);
+  } else {
+    const lo=Math.max(1,Math.floor(base*0.65));
+    const hi=Math.ceil(base*1.22);
+    const step=Math.max(1,Math.round((hi-lo)/12));
+    for (let n=lo;n<=hi;n+=step) values.add(n);
+    for (let n=base-2;n<=base+3;n++) if(n>0) values.add(n);
+  }
+  return [...values].sort((a,b)=>a-b).slice(0,22);
+}
+
+function recommendCountAndLayout(args) {
+  const theoreticalCount=Math.max(1,args.basePlacements.length || args.coverage.count);
+  const counts=candidateCountsAround(theoreticalCount);
+  const evaluated=[];
+
+  for (const count of counts) {
+    const layout=chooseBestLayoutForCount({...args,count});
+    if (layout) evaluated.push({count,...layout});
+  }
+  if (!evaluated.length) return null;
+
+  const maxTolerance=Math.max(...evaluated.map(x=>x.acoustic.tolerancePct));
+  const acceptable=evaluated.filter(x=>
+    x.acoustic.tolerancePct >= Math.max(90,maxTolerance-2.5) &&
+    x.acoustic.average >= args.targetSPL-1.5 &&
+    x.acoustic.min >= args.targetSPL-6
+  );
+
+  // Nejmenší počet, který už prakticky dosahuje nejlepší kvality.
+  const chosen=(acceptable.length ? acceptable : evaluated.slice().sort((a,b)=>b.score-a.score))
+    .slice()
+    .sort((a,b)=> acceptable.length ? a.count-b.count : b.score-a.score)[0];
+
+  return {recommendedCount:chosen.count,chosen,evaluated,theoreticalCount};
+}
+
+function populateSpeakerCountOverrideOptions(recommendedCount,currentValue="auto") {
+  const select=document.getElementById("speakerCountOverride");
+  if (!select) return;
+  const maxCount=Math.min(240,Math.max(recommendedCount+12,Math.ceil(recommendedCount*1.6),16));
+  select.innerHTML="";
+  const auto=document.createElement("option");
+  auto.value="auto";
+  auto.textContent=`Automaticky – ${recommendedCount} ks (doporučeno)`;
+  select.appendChild(auto);
+  for(let n=1;n<=maxCount;n++){
+    const o=document.createElement("option");
+    o.value=String(n);
+    o.textContent=n===recommendedCount?`${n} ks – doporučeno`:`${n} ks`;
+    select.appendChild(o);
+  }
+  if ([...select.options].some(o=>o.value===String(currentValue))) select.value=String(currentValue);
+  else select.value="auto";
+}
+
+function optimizePlacementsForRoom(basePlacements, coverage, room, mode = "balanced") {
+  const count=Math.max(1,basePlacements.length);
+  const candidates=layoutCandidatesForCount(count,coverage,room,mode);
+  if (!candidates.length) {
+    return {placements:basePlacements,optimized:false,method:"Základní rozmístění",improvementPct:0,clearanceM:recommendedWallClearanceMeters(coverage,room)};
+  }
+
+  const samples=makeOptimizationSamples(room,700);
+  const baseScore=placementGeometryScore(basePlacements,room,samples,recommendedWallClearanceMeters(coverage,room));
+  let best=candidates[0], bestScore=Infinity;
+  for(const c of candidates){
+    const s=placementGeometryScore(c.placements,room,samples,c.clearanceM);
+    if(s<bestScore){bestScore=s;best=c;}
+  }
+  return {
+    placements:best.placements,
+    optimized:mode!=="regular",
+    method:best.method,
+    improvementPct:baseScore>0?Math.max(0,(baseScore-bestScore)/baseScore*100):0,
+    clearanceM:best.clearanceM
   };
 }
 function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, coverage) {
@@ -2631,6 +2884,7 @@ function calculate() {
   const ampPriority = document.getElementById("ampPriority")?.value || "balanced";
   const dantePreference = document.getElementById("dantePreference")?.value || "any";
   const placementOptimizationMode = document.getElementById("placementOptimization")?.value || "balanced";
+  const speakerCountOverride = document.getElementById("speakerCountOverride")?.value || "auto";
   const pendantHeightM = speakerType === "pendant"
     ? Number(document.getElementById("pendantHeight").value)
     : 0;
@@ -2707,13 +2961,65 @@ function calculate() {
     return;
   }
 
-  const placementOptimization = optimizePlacementsForRoom(
+  const countRecommendation = recommendCountAndLayout({
     basePlacements,
     coverage,
     room,
-    placementOptimizationMode
-  );
-  const placements = placementOptimization.placements;
+    mode: placementOptimizationMode,
+    speaker,
+    targetSPL,
+    ambientNoise,
+    useCase,
+    voltage,
+    mountingHeightFt,
+    listenerHeightFt
+  });
+
+  if (!countRecommendation) {
+    alert("Pro zadané podmínky se nepodařilo najít vhodné rozmístění.");
+    return;
+  }
+
+  const recommendedCount = countRecommendation.recommendedCount;
+  populateSpeakerCountOverrideOptions(recommendedCount, speakerCountOverride);
+
+  const manualCount = speakerCountOverride !== "auto"
+    ? Math.max(1, Math.round(numValue(speakerCountOverride, recommendedCount)))
+    : recommendedCount;
+
+  let selectedLayout;
+  if (manualCount === recommendedCount) {
+    selectedLayout = countRecommendation.chosen;
+  } else {
+    selectedLayout = chooseBestLayoutForCount({
+      count: manualCount,
+      coverage,
+      room,
+      mode: placementOptimizationMode,
+      speaker,
+      targetSPL,
+      ambientNoise,
+      useCase,
+      voltage,
+      mountingHeightFt,
+      listenerHeightFt
+    });
+  }
+
+  if (!selectedLayout?.placements?.length) {
+    alert("Zvolený počet reproduktorů nelze pro tento půdorys vhodně rozmístit.");
+    return;
+  }
+
+  const placements = selectedLayout.placements;
+  const placementOptimization = {
+    placements,
+    optimized: placementOptimizationMode !== "regular",
+    method: selectedLayout.method,
+    improvementPct: 0,
+    clearanceM: selectedLayout.clearanceM,
+    recommendedCount
+  };
   const effectiveCoverage = {...coverage, count: placements.length};
 
   const power = calculatePower({
@@ -2797,10 +3103,7 @@ function calculate() {
   document.getElementById("resultTitle").textContent = speaker.model;
   updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${effectiveCoverage.count} ks`;
-  document.getElementById("layoutValue").textContent =
-    room.shape === "rectangle"
-      ? `${coverage.columns} × ${coverage.rows}`
-      : placementOptimization.method;
+  document.getElementById("layoutValue").textContent = placementOptimization.method;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
   document.getElementById("averageSplValue").textContent = `${heatmap.average.toFixed(1)} dB`;
@@ -2859,14 +3162,11 @@ function calculate() {
 
   const optimizationSummary = document.getElementById("optimizationSummaryValue");
   if (optimizationSummary) {
-    optimizationSummary.textContent =
-      room.shape === "rectangle"
-        ? "Pravidelná mřížka"
-        : `${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`;
+    optimizationSummary.textContent = placementOptimization.method;
     optimizationSummary.title =
-      room.shape === "rectangle"
-        ? "Pravidelná obdélníková mřížka"
-        : placementOptimization.method;
+      speakerCountOverride === "auto"
+        ? `Automaticky doporučeno ${recommendedCount} ks`
+        : `Ruční počet ${effectiveCoverage.count} ks; doporučeno ${recommendedCount} ks`;
   }
 
   const roomAreaSummary = document.getElementById("roomAreaSummaryValue");
@@ -2911,6 +3211,7 @@ function calculate() {
 populateSpeakerOverrideOptions();
 
 document.getElementById("speakerOverride").addEventListener("change", calculate);
+document.getElementById("speakerCountOverride")?.addEventListener("change", calculate);
 
 document.getElementById("speakerType").addEventListener("change", (e) => {
   document.getElementById("pendantHeightRow").classList.toggle("hidden", e.target.value !== "pendant");
