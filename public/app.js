@@ -1,4 +1,4 @@
-const APP_VERSION = "0.103";
+const APP_VERSION = "0.104";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -772,10 +772,26 @@ function getRoomBoundarySegments(room) {
   }
 
   const cuts = room.cutouts || [];
-  const topCuts = cuts.filter(c => c.side === "top").map(c => [c.x1, c.x2]);
-  const bottomCuts = cuts.filter(c => c.side === "bottom").map(c => [c.x1, c.x2]);
-  const leftCuts = cuts.filter(c => c.side === "left").map(c => [c.y1, c.y2]);
-  const rightCuts = cuts.filter(c => c.side === "right").map(c => [c.y1, c.y2]);
+  const eps = 1e-7;
+
+  // Důležité: ořežeme vnější stěny podle každého výřezu, který se
+  // dané stěny skutečně dotýká. Nejen podle hodnoty cut.side.
+  // Díky tomu výřez s odsazením 0 nezanechá původní hranu uvnitř otvoru.
+  const topCuts = cuts
+    .filter(c => Math.abs(c.y1) <= eps)
+    .map(c => [c.x1, c.x2]);
+
+  const bottomCuts = cuts
+    .filter(c => Math.abs(c.y2 - room.lengthM) <= eps)
+    .map(c => [c.x1, c.x2]);
+
+  const leftCuts = cuts
+    .filter(c => Math.abs(c.x1) <= eps)
+    .map(c => [c.y1, c.y2]);
+
+  const rightCuts = cuts
+    .filter(c => Math.abs(c.x2 - room.widthM) <= eps)
+    .map(c => [c.y1, c.y2]);
 
   const segments = [];
 
@@ -792,21 +808,48 @@ function getRoomBoundarySegments(room) {
     segments.push([room.widthM, a, room.widthM, b]);
   }
 
+  // Vnitřní tři hrany každého výřezu.
   for (const c of cuts) {
     if (c.side === "top") {
-      segments.push([c.x1,c.y1,c.x1,c.y2], [c.x1,c.y2,c.x2,c.y2], [c.x2,c.y2,c.x2,c.y1]);
+      segments.push(
+        [c.x1,c.y1,c.x1,c.y2],
+        [c.x1,c.y2,c.x2,c.y2],
+        [c.x2,c.y2,c.x2,c.y1]
+      );
     } else if (c.side === "bottom") {
-      segments.push([c.x1,c.y2,c.x1,c.y1], [c.x1,c.y1,c.x2,c.y1], [c.x2,c.y1,c.x2,c.y2]);
+      segments.push(
+        [c.x1,c.y2,c.x1,c.y1],
+        [c.x1,c.y1,c.x2,c.y1],
+        [c.x2,c.y1,c.x2,c.y2]
+      );
     } else if (c.side === "left") {
-      segments.push([c.x1,c.y1,c.x2,c.y1], [c.x2,c.y1,c.x2,c.y2], [c.x2,c.y2,c.x1,c.y2]);
+      segments.push(
+        [c.x1,c.y1,c.x2,c.y1],
+        [c.x2,c.y1,c.x2,c.y2],
+        [c.x2,c.y2,c.x1,c.y2]
+      );
     } else {
-      segments.push([c.x2,c.y1,c.x1,c.y1], [c.x1,c.y1,c.x1,c.y2], [c.x1,c.y2,c.x2,c.y2]);
+      segments.push(
+        [c.x2,c.y1,c.x1,c.y1],
+        [c.x1,c.y1,c.x1,c.y2],
+        [c.x1,c.y2,c.x2,c.y2]
+      );
     }
   }
 
-  return segments;
+  // Odstraníme nulové a duplicitní segmenty, které mohou vzniknout,
+  // když výřez začíná přesně v rohu.
+  const seen = new Set();
+  return segments.filter(([x1,y1,x2,y2]) => {
+    if (Math.hypot(x2-x1, y2-y1) < 1e-6) return false;
+    const a = `${x1.toFixed(6)},${y1.toFixed(6)}`;
+    const b = `${x2.toFixed(6)},${y2.toFixed(6)}`;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
-
 function distanceToRoomBoundaryMeters(xM, yM, room) {
   if (!isPointInsideRoomMeters(xM, yM, room)) return 0;
 

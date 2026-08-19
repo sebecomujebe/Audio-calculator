@@ -1787,3 +1787,85 @@ input[type="number"]::-webkit-outer-spin-button {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* v0.104 – parametry vedle popisků */
+@media (min-width: 980px) {
+  .compact-form-panel > label:not(.second-cut-toggle),
+  .compact-form-panel #roomDimensionsGrid > label,
+  .compact-form-panel .compact-grid-2 > label,
+  .compact-form-panel .cutout-compact-grid > label,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) {
+    display: grid !important;
+    grid-template-columns: minmax(112px, 0.9fr) minmax(125px, 1.1fr);
+    align-items: center;
+    column-gap: 8px !important;
+    row-gap: 2px !important;
+    margin-bottom: 3px !important;
+  }
+
+  .compact-form-panel > label:not(.second-cut-toggle) > span:first-child,
+  .compact-form-panel #roomDimensionsGrid > label > span:first-child,
+  .compact-form-panel .compact-grid-2 > label > span:first-child,
+  .compact-form-panel .cutout-compact-grid > label > span:first-child,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) > span:first-child {
+    grid-column: 1;
+    margin: 0 !important;
+    align-self: center;
+  }
+
+  .compact-form-panel > label:not(.second-cut-toggle) > select,
+  .compact-form-panel > label:not(.second-cut-toggle) > input,
+  .compact-form-panel > label:not(.second-cut-toggle) > .field-with-unit,
+  .compact-form-panel #roomDimensionsGrid > label > select,
+  .compact-form-panel #roomDimensionsGrid > label > input,
+  .compact-form-panel #roomDimensionsGrid > label > .field-with-unit,
+  .compact-form-panel .compact-grid-2 > label > select,
+  .compact-form-panel .compact-grid-2 > label > input,
+  .compact-form-panel .compact-grid-2 > label > .field-with-unit,
+  .compact-form-panel .cutout-compact-grid > label > select,
+  .compact-form-panel .cutout-compact-grid > label > input,
+  .compact-form-panel .cutout-compact-grid > label > .field-with-unit,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) > select,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) > input,
+  .compact-form-panel .shape-extra > label:not(.second-cut-toggle) > .field-with-unit {
+    grid-column: 2;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Vysvětlivky zůstanou pod celým řádkem. */
+  .compact-form-panel .field-hint {
+    grid-column: 1 / -1;
+  }
+
+  /* Dvojice parametrů už nemusí být ve dvou sloupcích – každý řádek
+     využije šířku panelu pro popisek + vstup. */
+  .compact-form-panel .grid-2,
+  .compact-form-panel .compact-grid-2,
+  .compact-form-panel .cutout-compact-grid,
+  .compact-form-panel .circle-dimensions-grid:not(.hidden) {
+    grid-template-columns: 1fr !important;
+    gap: 2px !important;
+  }
+
+  .compact-form-panel .cutout-card {
+    padding: 6px 8px !important;
+  }
+
+  .compact-form-panel .cutout-title {
+    margin-bottom: 3px !important;
+  }
+
+  .compact-form-panel .second-cut-toggle {
+    min-height: 28px;
+  }
+}
+
+/* Menší obrazovky ponechávají pole pod popisky kvůli šířce. */
+@media (max-width: 979px) {
+  .compact-form-panel label {
+    display: flex;
+    flex-direction: column;
+  }
+}
