@@ -1,4 +1,4 @@
-const APP_VERSION = "0.97";
+const APP_VERSION = "0.98";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -590,10 +590,24 @@ function roomClipPath(room, ox, oy, scale, clipId) {
 
 function updateRoomShapeUi() {
   const shape = document.getElementById("roomShape")?.value || "rectangle";
+  const roomGrid = document.getElementById("roomDimensionsGrid");
+  const heightRow = document.getElementById("heightRow");
+  const ambientNoiseRow = document.getElementById("ambientNoiseRow");
+  const circleControls = document.getElementById("circleControls");
+
   document.getElementById("lengthRow")?.classList.toggle("hidden", shape === "circle");
   document.getElementById("widthRow")?.classList.toggle("hidden", shape === "circle");
   document.getElementById("lShapeControls")?.classList.toggle("hidden", shape !== "lshape");
-  document.getElementById("circleControls")?.classList.toggle("hidden", shape !== "circle");
+  circleControls?.classList.toggle("hidden", shape !== "circle");
+
+  // U kruhové místnosti držíme průměr a výšku vedle sebe.
+  if (shape === "circle") {
+    if (heightRow && circleControls && heightRow.parentElement !== circleControls) {
+      circleControls.appendChild(heightRow);
+    }
+  } else if (heightRow && roomGrid && ambientNoiseRow && heightRow.parentElement !== roomGrid) {
+    roomGrid.insertBefore(heightRow, ambientNoiseRow);
+  }
 }
 
 function calculatePlacements(coverage, room = null) {
@@ -1404,8 +1418,8 @@ function updateHeatmapScaleLabels(heatmap) {
   const high = document.getElementById("heatmapScaleHighLabel");
   if (!low || !high || !heatmap) return;
 
-  low.textContent = `${heatmap.min.toFixed(0)} dB`;
-  high.textContent = `${heatmap.max.toFixed(0)} dB`;
+  low.textContent = `Min. ${heatmap.min.toFixed(0)} dB`;
+  high.textContent = `Max. ${heatmap.max.toFixed(0)} dB`;
 }
 
 let audioObjectUrl = null;
@@ -2738,6 +2752,28 @@ const spatialAudio = document.getElementById("spatialAudio");
 const audioFileInput = document.getElementById("audioFileInput");
 const audioPlayToggle = document.getElementById("audioPlayToggle");
 const audioGainStatus = document.getElementById("audioGainStatus");
+const audioSeek = document.getElementById("audioSeek");
+const audioCurrentTime = document.getElementById("audioCurrentTime");
+const audioDuration = document.getElementById("audioDuration");
+
+function formatAudioTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function updateAudioProgress() {
+  if (!spatialAudio) return;
+  const duration = Number.isFinite(spatialAudio.duration) ? spatialAudio.duration : 0;
+  const current = Number.isFinite(spatialAudio.currentTime) ? spatialAudio.currentTime : 0;
+  if (audioCurrentTime) audioCurrentTime.textContent = formatAudioTime(current);
+  if (audioDuration) audioDuration.textContent = formatAudioTime(duration);
+  if (audioSeek) {
+    audioSeek.disabled = duration <= 0;
+    audioSeek.value = duration > 0 ? String(Math.round(current / duration * 1000)) : "0";
+  }
+}
 
 function updateAudioPlayButton() {
   if (!audioPlayToggle || !spatialAudio) return;
@@ -2751,6 +2787,12 @@ audioFileInput?.addEventListener("change", () => {
   audioObjectUrl = URL.createObjectURL(file);
   spatialAudio.src = audioObjectUrl;
   spatialAudio.load();
+  if (audioSeek) {
+    audioSeek.value = "0";
+    audioSeek.disabled = true;
+  }
+  if (audioCurrentTime) audioCurrentTime.textContent = "0:00";
+  if (audioDuration) audioDuration.textContent = "0:00";
   if (audioPlayToggle) audioPlayToggle.disabled = false;
   if (audioGainStatus) audioGainStatus.textContent = "Připraveno";
   updateSpatialAudioGain();
@@ -2774,6 +2816,15 @@ audioPlayToggle?.addEventListener("click", async () => {
 spatialAudio?.addEventListener("play", updateAudioPlayButton);
 spatialAudio?.addEventListener("pause", updateAudioPlayButton);
 spatialAudio?.addEventListener("ended", updateAudioPlayButton);
+spatialAudio?.addEventListener("loadedmetadata", updateAudioProgress);
+spatialAudio?.addEventListener("durationchange", updateAudioProgress);
+spatialAudio?.addEventListener("timeupdate", updateAudioProgress);
+
+audioSeek?.addEventListener("input", () => {
+  if (!spatialAudio || !Number.isFinite(spatialAudio.duration) || spatialAudio.duration <= 0) return;
+  spatialAudio.currentTime = Number(audioSeek.value) / 1000 * spatialAudio.duration;
+  updateAudioProgress();
+});
 
 document.getElementById("roomShape")?.addEventListener("change", () => {
   updateRoomShapeUi();

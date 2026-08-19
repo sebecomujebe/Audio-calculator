@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.97" />
+  <link rel="stylesheet" href="style.css?v=0.98" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.97</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.98</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -38,7 +38,7 @@
           </select>
         </label>
 
-        <div class="grid-2">
+        <div id="roomDimensionsGrid" class="grid-2">
           <label id="lengthRow">
             <span>Délka místnosti</span>
             <div class="field-with-unit">
@@ -55,7 +55,7 @@
             </div>
           </label>
 
-          <label>
+          <label id="heightRow">
             <span>Výška místnosti</span>
             <div class="field-with-unit">
               <input id="height" type="number" max="9999" min="2" step="0.1" value="3.2" />
@@ -63,7 +63,7 @@
             </div>
           </label>
 
-          <label>
+          <label id="ambientNoiseRow">
             <span>Okolní hluk</span>
             <select id="ambientNoisePreset">
               <option value="40">40 dB – velmi tiché prostředí / tichá knihovna</option>
@@ -112,7 +112,7 @@
           </label>
         </div>
 
-        <div id="circleControls" class="shape-extra hidden">
+        <div id="circleControls" class="shape-extra circle-dimensions-grid hidden">
           <label>
             <span>Průměr místnosti</span>
             <div class="field-with-unit">
@@ -214,6 +214,7 @@
         <div class="panel result-overview-panel">
           <div class="section-heading result-heading">
             <div class="result-main">
+              <div id="speakerProductImageSlot" class="product-image-slot" data-product-image-slot="speaker" hidden></div>
               <div class="eyebrow">VÝSLEDEK NÁVRHU</div>
               <div class="result-title-row">
                 <h2 id="resultTitle">—</h2>
@@ -257,28 +258,6 @@
               </div>
             </section>
 
-            <section class="result-card">
-              <div class="result-card-title">Pokrytí a rozmístění</div>
-              <div class="result-metric-row">
-                <div>
-                  <span>Rozteč X × Y</span>
-                  <strong id="spacingSummaryValue">—</strong>
-                </div>
-                <div>
-                  <span>Pokrytí 1 repro</span>
-                  <strong id="coverageSummaryValue">—</strong>
-                </div>
-                <div>
-                  <span>Optimalizace</span>
-                  <strong id="optimizationSummaryValue">—</strong>
-                </div>
-              </div>
-              <div class="result-card-subline">
-                <span>Rozmístění</span>
-                <strong id="layoutValue">—</strong>
-              </div>
-            </section>
-
             <section class="result-card spl-result-card">
               <div class="result-card-title">SPL v prostoru</div>
               <div class="result-metric-row result-metric-row-4">
@@ -310,8 +289,114 @@
                 </div>
               </div>
             </section>
+          </div>
+        </div>
 
-            <section class="result-card project-result-card">
+        <div class="panel floor-panel">
+          <div class="section-heading result-heading floor-heading">
+            <div>
+              <div class="eyebrow">PŮDORYS</div>
+              <h2>Rozmístění reproduktorů</h2>
+            </div>
+            <div class="audio-demo" aria-label="Audio demonstrace SPL">
+              <p class="audio-demo-description">
+                Vyberte skladbu a spusťte ji. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
+              </p>
+              <div class="floor-audio-tools">
+                <label class="audio-file-label" for="audioFileInput">Vybrat skladbu</label>
+                <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
+                <button id="audioPlayToggle" class="secondary-button small-button" type="button" disabled>Spustit</button>
+                <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
+                <audio id="spatialAudio" preload="metadata"></audio>
+              </div>
+              <div class="audio-progress-row">
+                <span id="audioCurrentTime">0:00</span>
+                <input id="audioSeek" class="audio-seek" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="Pozice ve skladbě" />
+                <span id="audioDuration">0:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="floorPlanWrap" class="floor-wrap">
+            <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
+          </div>
+
+          <div class="heatmap-scale-wrap">
+            <div class="heatmap-scale">
+              <span id="heatmapScaleLowLabel">Min. SPL</span>
+              <div class="heatbar"></div>
+              <span id="heatmapScaleHighLabel">Max. SPL</span>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i class="legend-dot speaker-dot"></i> Reproduktor</span>
+            <span><i class="legend-dot listener-dot"></i> Posluchač – tažením ho přesuňte</span>
+          </div>
+        </div>
+
+
+        <div class="section-views-grid">
+          <div class="panel section-view-panel">
+          <div class="section-heading result-heading">
+            <div>
+              <div class="eyebrow">ŘEZ PROSTOREM</div>
+              <h2>Boční pohled</h2>
+            </div>
+            
+          </div>
+          <div class="section-view-wrap">
+            <svg id="sideView" viewBox="0 0 900 420" role="img" aria-label="Boční pohled na místnost a kužely reproduktorů"></svg>
+          </div>
+          <div class="section-meta" id="sideViewMeta">—</div>
+        </div>
+
+          <div class="panel section-view-panel">
+          <div class="section-heading result-heading">
+            <div>
+              <div class="eyebrow">ŘEZ PROSTOREM</div>
+              <h2>Čelní pohled</h2>
+            </div>
+            
+          </div>
+          <div class="section-view-wrap">
+            <svg id="frontView" viewBox="0 0 900 420" role="img" aria-label="Čelní pohled na místnost a kužely reproduktorů"></svg>
+          </div>
+          <div class="section-meta" id="frontViewMeta">—</div>
+        </div>
+        </div>
+
+        <details class="panel technical-details-panel">
+          <summary class="technical-details-summary">
+            <span>
+              <span class="eyebrow">DETAILY NÁVRHU</span>
+              <strong>Technické detaily</strong>
+            </span>
+            <span class="technical-details-hint">Zobrazit</span>
+          </summary>
+          <div class="technical-details-content">
+            <div class="details-result-grid">
+              <section class="result-card">
+              <div class="result-card-title">Pokrytí a rozmístění</div>
+              <div class="result-metric-row">
+                <div>
+                  <span>Rozteč X × Y</span>
+                  <strong id="spacingSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Pokrytí 1 repro</span>
+                  <strong id="coverageSummaryValue">—</strong>
+                </div>
+                <div>
+                  <span>Optimalizace</span>
+                  <strong id="optimizationSummaryValue">—</strong>
+                </div>
+              </div>
+              <div class="result-card-subline">
+                <span>Rozmístění</span>
+                <strong id="layoutValue">—</strong>
+              </div>
+            </section>
+              <section class="result-card project-result-card">
               <div class="result-card-title">Projekt</div>
               <div class="result-metric-row">
                 <div>
@@ -328,78 +413,7 @@
                 </div>
               </div>
             </section>
-          </div>
-        </div>
-
-        <div class="panel floor-panel">
-          <div class="section-heading result-heading floor-heading">
-            <div>
-              <div class="eyebrow">PŮDORYS</div>
-              <h2>Rozmístění reproduktorů</h2>
             </div>
-            <div class="floor-audio-tools" aria-label="Audio demonstrace SPL">
-              <label class="audio-file-label" for="audioFileInput">Vybrat skladbu</label>
-              <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
-              <button id="audioPlayToggle" class="secondary-button small-button" type="button" disabled>Spustit</button>
-              <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
-              <audio id="spatialAudio" preload="metadata"></audio>
-            </div>
-          </div>
-
-          <div id="floorPlanWrap" class="floor-wrap">
-            <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
-          </div>
-
-          <div class="heatmap-scale-wrap">
-            <div class="heatmap-scale">
-              <span id="heatmapScaleLowLabel">Nižší SPL</span>
-              <div class="heatbar"></div>
-              <span id="heatmapScaleHighLabel">Vyšší SPL</span>
-            </div>
-          </div>
-          <div class="legend">
-            <span><i class="legend-dot speaker-dot"></i> Reproduktor</span>
-            <span><i class="legend-dot listener-dot"></i> Posluchač – tažením ho přesuňte</span>
-          </div>
-        </div>
-
-
-        <details class="panel technical-details-panel">
-          <summary class="technical-details-summary">
-            <span>
-              <span class="eyebrow">DETAILY NÁVRHU</span>
-              <strong>Technické detaily</strong>
-            </span>
-            <span class="technical-details-hint">Zobrazit</span>
-          </summary>
-          <div class="technical-details-content">
-        <div class="panel section-view-panel">
-          <div class="section-heading result-heading">
-            <div>
-              <div class="eyebrow">ŘEZ PROSTOREM</div>
-              <h2>Boční pohled</h2>
-            </div>
-            
-          </div>
-          <div class="section-view-wrap">
-            <svg id="sideView" viewBox="0 0 900 420" role="img" aria-label="Boční pohled na místnost a kužely reproduktorů"></svg>
-          </div>
-          <div class="section-meta" id="sideViewMeta">—</div>
-        </div>
-
-        <div class="panel section-view-panel">
-          <div class="section-heading result-heading">
-            <div>
-              <div class="eyebrow">ŘEZ PROSTOREM</div>
-              <h2>Čelní pohled</h2>
-            </div>
-            
-          </div>
-          <div class="section-view-wrap">
-            <svg id="frontView" viewBox="0 0 900 420" role="img" aria-label="Čelní pohled na místnost a kužely reproduktorů"></svg>
-          </div>
-          <div class="section-meta" id="frontViewMeta">—</div>
-        </div>
 
         <div class="panel">
           <div class="section-heading">
@@ -469,6 +483,7 @@
             </div>
           </div>
           <div class="amp-result">
+            <div id="amplifierProductImageSlot" class="product-image-slot" data-product-image-slot="amplifier" hidden></div>
             <strong id="amplifierModelValue">—</strong>
             <p id="amplifierDetail" class="recommendation-reason">—</p>
           </div>
@@ -521,6 +536,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.97"></script>
+  <script src="app.js?v=0.98"></script>
 </body>
 </html>
