@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.102" />
+  <link rel="stylesheet" href="style.css?v=0.103" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.102</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.103</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -87,31 +87,38 @@
                 <div id="lShapeControls" class="shape-extra hidden">
           <div class="cutout-card">
             <div class="cutout-title">Výřez 1</div>
-            <div class="compact-grid-2">
+            <div class="cutout-compact-grid">
               <label>
-                <span>Šířka výřezu</span>
+                <span>Strana</span>
+                <select id="lCutSide">
+                  <option value="top" selected>Horní</option>
+                  <option value="right">Pravá</option>
+                  <option value="bottom">Dolní</option>
+                  <option value="left">Levá</option>
+                </select>
+              </label>
+              <label>
+                <span>Šířka podél strany</span>
                 <div class="field-with-unit">
                   <input id="lCutWidth" type="number" min="0.2" step="0.1" value="3" />
                   <span>m</span>
                 </div>
               </label>
               <label>
-                <span>Délka výřezu</span>
+                <span>Hloubka</span>
                 <div class="field-with-unit">
                   <input id="lCutLength" type="number" min="0.2" step="0.1" value="3" />
                   <span>m</span>
                 </div>
               </label>
+              <label>
+                <span>Odsazení</span>
+                <div class="field-with-unit">
+                  <input id="lCutOffset" type="number" min="0" step="0.1" value="2" />
+                  <span>m</span>
+                </div>
+              </label>
             </div>
-            <label>
-              <span>Umístění výřezu</span>
-              <select id="lCutCorner">
-                <option value="top-right" selected>Pravý horní roh</option>
-                <option value="top-left">Levý horní roh</option>
-                <option value="bottom-right">Pravý dolní roh</option>
-                <option value="bottom-left">Levý dolní roh</option>
-              </select>
-            </label>
           </div>
 
           <label class="second-cut-toggle">
@@ -121,35 +128,42 @@
 
           <div id="secondCutControls" class="cutout-card hidden">
             <div class="cutout-title">Výřez 2</div>
-            <div class="compact-grid-2">
+            <div class="cutout-compact-grid">
               <label>
-                <span>Šířka výřezu</span>
+                <span>Strana</span>
+                <select id="lCutSide2">
+                  <option value="bottom" selected>Dolní</option>
+                  <option value="top">Horní</option>
+                  <option value="right">Pravá</option>
+                  <option value="left">Levá</option>
+                </select>
+              </label>
+              <label>
+                <span>Šířka podél strany</span>
                 <div class="field-with-unit">
                   <input id="lCutWidth2" type="number" min="0.2" step="0.1" value="3" />
                   <span>m</span>
                 </div>
               </label>
               <label>
-                <span>Délka výřezu</span>
+                <span>Hloubka</span>
                 <div class="field-with-unit">
                   <input id="lCutLength2" type="number" min="0.2" step="0.1" value="3" />
                   <span>m</span>
                 </div>
               </label>
+              <label>
+                <span>Odsazení</span>
+                <div class="field-with-unit">
+                  <input id="lCutOffset2" type="number" min="0" step="0.1" value="2" />
+                  <span>m</span>
+                </div>
+              </label>
             </div>
-            <label>
-              <span>Umístění výřezu</span>
-              <select id="lCutCorner2">
-                <option value="top-left" selected>Levý horní roh</option>
-                <option value="top-right">Pravý horní roh</option>
-                <option value="bottom-right">Pravý dolní roh</option>
-                <option value="bottom-left">Levý dolní roh</option>
-              </select>
-            </label>
           </div>
 
           <span class="field-hint cutout-hint">
-            Dva výřezy lze kombinovat například pro T‑podobné a další členité půdorysy.
+            Odsazení se měří zleva u horní/dolní strany a shora u levé/pravé strany. Centrálním výřezem snadno vytvoříte U tvar.
           </span>
         </div>
 
@@ -333,6 +347,30 @@
               <div class="eyebrow">PŮDORYS</div>
               <h2>Rozmístění reproduktorů</h2>
             </div>
+            
+          </div>
+
+          <div id="floorPlanWrap" class="floor-wrap">
+            <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
+          </div>
+
+          
+          
+        
+          <div class="floor-footer">
+            <div class="floor-footer-info">
+              <div class="heatmap-scale-wrap">
+            <div class="heatmap-scale">
+              <span id="heatmapScaleLowLabel">Min. SPL</span>
+              <div class="heatbar"></div>
+              <span id="heatmapScaleHighLabel">Max. SPL</span>
+            </div>
+          </div>
+              <div class="legend">
+            <span><i class="legend-dot speaker-dot"></i> Reproduktor</span>
+            <span><i class="legend-dot listener-dot"></i> Posluchač – tažením ho přesuňte</span>
+          </div>
+            </div>
             <div class="audio-demo" aria-label="Audio demonstrace SPL">
               <p class="audio-demo-description">
                 Vyberte skladbu a spusťte ji. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
@@ -351,23 +389,7 @@
               </div>
             </div>
           </div>
-
-          <div id="floorPlanWrap" class="floor-wrap">
-            <svg id="floorPlan" viewBox="0 0 900 560" role="img" aria-label="Půdorys místnosti"></svg>
-          </div>
-
-          <div class="heatmap-scale-wrap">
-            <div class="heatmap-scale">
-              <span id="heatmapScaleLowLabel">Min. SPL</span>
-              <div class="heatbar"></div>
-              <span id="heatmapScaleHighLabel">Max. SPL</span>
-            </div>
-          </div>
-          <div class="legend">
-            <span><i class="legend-dot speaker-dot"></i> Reproduktor</span>
-            <span><i class="legend-dot listener-dot"></i> Posluchač – tažením ho přesuňte</span>
-          </div>
-        </div>
+</div>
 
 
         <div class="section-views-stack">
@@ -574,6 +596,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.102"></script>
+  <script src="app.js?v=0.103"></script>
 </body>
 </html>

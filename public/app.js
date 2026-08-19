@@ -1,4 +1,4 @@
-const APP_VERSION = "0.102";
+const APP_VERSION = "0.103";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -460,21 +460,33 @@ function calculateCoverage({
 }
 
 
-function cutoutRectFromCorner(widthM, lengthM, corner, roomWidthM, roomLengthM) {
-  if (corner === "top-left") {
-    return {x1: 0, y1: 0, x2: widthM, y2: lengthM};
+function cutoutRectFromSide(spanM, depthM, side, offsetM, roomWidthM, roomLengthM) {
+  const horizontal = side === "top" || side === "bottom";
+  const sideLength = horizontal ? roomWidthM : roomLengthM;
+  const maxDepth = horizontal ? roomLengthM : roomWidthM;
+
+  const span = Math.min(Math.max(0.2, spanM), Math.max(0.2, sideLength - 0.2));
+  const depth = Math.min(Math.max(0.2, depthM), Math.max(0.2, maxDepth - 0.2));
+  const offset = Math.max(0, Math.min(offsetM, Math.max(0, sideLength - span)));
+
+  if (side === "top") {
+    return {x1: offset, y1: 0, x2: offset + span, y2: depth, side, spanM: span, depthM: depth, offsetM: offset};
   }
-  if (corner === "top-right") {
-    return {x1: roomWidthM - widthM, y1: 0, x2: roomWidthM, y2: lengthM};
+  if (side === "bottom") {
+    return {x1: offset, y1: roomLengthM - depth, x2: offset + span, y2: roomLengthM, side, spanM: span, depthM: depth, offsetM: offset};
   }
-  if (corner === "bottom-left") {
-    return {x1: 0, y1: roomLengthM - lengthM, x2: widthM, y2: roomLengthM};
+  if (side === "left") {
+    return {x1: 0, y1: offset, x2: depth, y2: offset + span, side, spanM: span, depthM: depth, offsetM: offset};
   }
   return {
-    x1: roomWidthM - widthM,
-    y1: roomLengthM - lengthM,
+    x1: roomWidthM - depth,
+    y1: offset,
     x2: roomWidthM,
-    y2: roomLengthM
+    y2: offset + span,
+    side,
+    spanM: span,
+    depthM: depth,
+    offsetM: offset
   };
 }
 
@@ -515,33 +527,26 @@ function getRoomShapeConfig() {
   const lengthM = Math.max(1, numValue(document.getElementById("length")?.value, 5));
 
   if (shape === "lshape") {
-    const cutWidthM = Math.min(
-      Math.max(0.2, numValue(document.getElementById("lCutWidth")?.value, 3)),
-      Math.max(0.2, widthM - 0.2)
-    );
-    const cutLengthM = Math.min(
-      Math.max(0.2, numValue(document.getElementById("lCutLength")?.value, 3)),
-      Math.max(0.2, lengthM - 0.2)
-    );
-    const cutCorner = document.getElementById("lCutCorner")?.value || "top-right";
+    const cutouts = [];
 
-    const cutouts = [
-      cutoutRectFromCorner(cutWidthM, cutLengthM, cutCorner, widthM, lengthM)
-    ];
+    const side1 = document.getElementById("lCutSide")?.value || "top";
+    const span1 = numValue(document.getElementById("lCutWidth")?.value, 3);
+    const depth1 = numValue(document.getElementById("lCutLength")?.value, 3);
+    const offset1 = numValue(document.getElementById("lCutOffset")?.value, 0);
+
+    cutouts.push(
+      cutoutRectFromSide(span1, depth1, side1, offset1, widthM, lengthM)
+    );
 
     const secondCutEnabled = Boolean(document.getElementById("secondCutEnabled")?.checked);
     if (secondCutEnabled) {
-      const cutWidthM2 = Math.min(
-        Math.max(0.2, numValue(document.getElementById("lCutWidth2")?.value, 3)),
-        Math.max(0.2, widthM - 0.2)
-      );
-      const cutLengthM2 = Math.min(
-        Math.max(0.2, numValue(document.getElementById("lCutLength2")?.value, 3)),
-        Math.max(0.2, lengthM - 0.2)
-      );
-      const cutCorner2 = document.getElementById("lCutCorner2")?.value || "top-left";
+      const side2 = document.getElementById("lCutSide2")?.value || "bottom";
+      const span2 = numValue(document.getElementById("lCutWidth2")?.value, 3);
+      const depth2 = numValue(document.getElementById("lCutLength2")?.value, 3);
+      const offset2 = numValue(document.getElementById("lCutOffset2")?.value, 0);
+
       cutouts.push(
-        cutoutRectFromCorner(cutWidthM2, cutLengthM2, cutCorner2, widthM, lengthM)
+        cutoutRectFromSide(span2, depth2, side2, offset2, widthM, lengthM)
       );
     }
 
@@ -650,7 +655,10 @@ function roomSvgShape(room, ox, oy, scale) {
   }
 
   if (room.shape === "lshape") {
-    return `<path d="${roomPathData(room, ox, oy, scale)}" fill="#111820" fill-rule="evenodd" stroke="#7d8998" stroke-width="2"/>`;
+    const outline = getRoomBoundarySegments(room).map(([x1,y1,x2,y2]) =>
+      `<line x1="${ox+x1*scale}" y1="${oy+y1*scale}" x2="${ox+x2*scale}" y2="${oy+y2*scale}" stroke="#7d8998" stroke-width="2"/>`
+    ).join("");
+    return `<path d="${roomPathData(room, ox, oy, scale)}" fill="#111820" fill-rule="evenodd" stroke="none"/>${outline}`;
   }
 
   return `<rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4" fill="#111820" stroke="#7d8998" stroke-width="2"/>`;
@@ -725,24 +733,74 @@ function pointSegmentDistance(px, py, ax, ay, bx, by) {
   return Math.hypot(px - qx, py - qy);
 }
 
+function subtractIntervals(fullStart, fullEnd, intervals) {
+  if (!intervals?.length) return [[fullStart, fullEnd]];
+
+  const merged = intervals
+    .map(([a,b]) => [Math.max(fullStart, a), Math.min(fullEnd, b)])
+    .filter(([a,b]) => b > a)
+    .sort((a,b) => a[0] - b[0])
+    .reduce((acc, cur) => {
+      if (!acc.length || cur[0] > acc[acc.length - 1][1]) {
+        acc.push(cur.slice());
+      } else {
+        acc[acc.length - 1][1] = Math.max(acc[acc.length - 1][1], cur[1]);
+      }
+      return acc;
+    }, []);
+
+  const result = [];
+  let cursor = fullStart;
+  for (const [a,b] of merged) {
+    if (a > cursor) result.push([cursor, a]);
+    cursor = Math.max(cursor, b);
+  }
+  if (cursor < fullEnd) result.push([cursor, fullEnd]);
+  return result;
+}
+
 function getRoomBoundarySegments(room) {
   if (room.shape === "circle") return [];
 
-  const segments = [
-    [0, 0, room.widthM, 0],
-    [room.widthM, 0, room.widthM, room.lengthM],
-    [room.widthM, room.lengthM, 0, room.lengthM],
-    [0, room.lengthM, 0, 0]
-  ];
+  if (room.shape !== "lshape") {
+    return [
+      [0, 0, room.widthM, 0],
+      [room.widthM, 0, room.widthM, room.lengthM],
+      [room.widthM, room.lengthM, 0, room.lengthM],
+      [0, room.lengthM, 0, 0]
+    ];
+  }
 
-  if (room.shape === "lshape") {
-    for (const cut of room.cutouts || []) {
-      segments.push(
-        [cut.x1, cut.y1, cut.x2, cut.y1],
-        [cut.x2, cut.y1, cut.x2, cut.y2],
-        [cut.x2, cut.y2, cut.x1, cut.y2],
-        [cut.x1, cut.y2, cut.x1, cut.y1]
-      );
+  const cuts = room.cutouts || [];
+  const topCuts = cuts.filter(c => c.side === "top").map(c => [c.x1, c.x2]);
+  const bottomCuts = cuts.filter(c => c.side === "bottom").map(c => [c.x1, c.x2]);
+  const leftCuts = cuts.filter(c => c.side === "left").map(c => [c.y1, c.y2]);
+  const rightCuts = cuts.filter(c => c.side === "right").map(c => [c.y1, c.y2]);
+
+  const segments = [];
+
+  for (const [a,b] of subtractIntervals(0, room.widthM, topCuts)) {
+    segments.push([a, 0, b, 0]);
+  }
+  for (const [a,b] of subtractIntervals(0, room.widthM, bottomCuts)) {
+    segments.push([a, room.lengthM, b, room.lengthM]);
+  }
+  for (const [a,b] of subtractIntervals(0, room.lengthM, leftCuts)) {
+    segments.push([0, a, 0, b]);
+  }
+  for (const [a,b] of subtractIntervals(0, room.lengthM, rightCuts)) {
+    segments.push([room.widthM, a, room.widthM, b]);
+  }
+
+  for (const c of cuts) {
+    if (c.side === "top") {
+      segments.push([c.x1,c.y1,c.x1,c.y2], [c.x1,c.y2,c.x2,c.y2], [c.x2,c.y2,c.x2,c.y1]);
+    } else if (c.side === "bottom") {
+      segments.push([c.x1,c.y2,c.x1,c.y1], [c.x1,c.y1,c.x2,c.y1], [c.x2,c.y1,c.x2,c.y2]);
+    } else if (c.side === "left") {
+      segments.push([c.x1,c.y1,c.x2,c.y1], [c.x2,c.y1,c.x2,c.y2], [c.x2,c.y2,c.x1,c.y2]);
+    } else {
+      segments.push([c.x2,c.y1,c.x1,c.y1], [c.x1,c.y1,c.x1,c.y2], [c.x1,c.y2,c.x2,c.y2]);
     }
   }
 
@@ -2922,11 +2980,11 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
 
 
 
-["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutWidth","lCutLength","lCutCorner","secondCutEnabled","lCutWidth2","lCutLength2","lCutCorner2","diameter","placementOptimization"]
+["length","width","height","ambientNoiseCustom","useCase","listenerPosition","coverageDensity","speakerType","pendantHeight","voltage","ampPriority","dantePreference","tapOverride","lCutSide","lCutWidth","lCutLength","lCutOffset","secondCutEnabled","lCutSide2","lCutWidth2","lCutLength2","lCutOffset2","diameter","placementOptimization"]
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (id === "secondCutEnabled") updateRoomShapeUi();
-      if (["length","width","lCutWidth","lCutLength","lCutCorner","secondCutEnabled","lCutWidth2","lCutLength2","lCutCorner2","diameter"].includes(id)) {
+      if (["length","width","lCutSide","lCutWidth","lCutLength","lCutOffset","secondCutEnabled","lCutSide2","lCutWidth2","lCutLength2","lCutOffset2","diameter"].includes(id)) {
         appState.listenerXFt = null;
         appState.listenerYFt = null;
       }
