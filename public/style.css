@@ -2219,3 +2219,13 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #cbd5df;
   font-weight: 650;
 }
+
+
+/* v0.110 – automatický přepočet bez redundantního tlačítka */
+.compact-form-panel > .note {
+  margin-top: 8px !important;
+}
+
+#technicalToleranceGoalValue {
+  max-width: 360px;
+}

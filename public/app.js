@@ -1,4 +1,4 @@
-const APP_VERSION = "0.109";
+const APP_VERSION = "0.110";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2000,6 +2000,32 @@ function candidateCountsForRecommendation(coverage, room) {
   return [...new Set(values)].sort((a,b)=>a-b);
 }
 
+
+function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
+  const clearanceM = recommendedWallClearanceMeters(coverage, room);
+
+  // Rekonstrukce původního SSC principu:
+  // 1) coverage diameter z výšky a vyzařovacího úhlu
+  // 2) target spacing podle zvoleného overlap / ±dB režimu
+  // 3) ceil(width/spacing) × ceil(length/spacing)
+  // 4) body ve středech jednotlivých buněk.
+  //
+  // Pro obdélník je to přímo původní SSC mřížka.
+  // Pro naše rozšířené tvary (kruh, výřezy) použijeme tutéž mřížku
+  // a pouze vynecháme body ležící mimo skutečnou plochu.
+  return {
+    placements: basePlacements.map(p => ({...p})),
+    method:
+      room.shape === "rectangle"
+        ? `SSC mřížka ${coverage.columns} × ${coverage.rows}`
+        : "SSC mřížka X/Y oříznutá tvarem místnosti",
+    clearanceM,
+    alignmentWeight: 3,
+    acoustic: null,
+    score: 0
+  };
+}
+
 function recommendationCacheKey(args) {
   return [
     roomGeometryCacheKey(args.room),
@@ -3605,50 +3631,105 @@ function calculate() {
     return;
   }
 
-  const countRecommendation = recommendSpeakerCountAndLayout({
-    basePlacements,
-    coverage,
-    room,
-    mode:placementOptimizationMode,
-    speaker,
-    targetSPL,
-    ambientNoise,
-    useCase,
-    voltage,
-    mountingHeightFt,
-    listenerHeightFt,
-    requestedTap:tapOverride
-  });
+  let countRecommendation;
+  let recommendedCount;
+  let selectedCount;
+  let selectedLayout;
 
-  if (!countRecommendation) {
-    alert("Pro zadané podmínky se nepodařilo najít vhodné rozmístění.");
-    return;
+  if (placementOptimizationMode === "regular") {
+    // PRAVIDELNÉ = návrat k SSC principu.
+    // Automatický počet není optimalizovaný podle naší heatmapy.
+    // Je dán přímo návrhovou roztečí z coverage režimu.
+    const sscLayout = getSscRegularAutomaticLayout(basePlacements, coverage, room);
+    recommendedCount = sscLayout.placements.length;
+
+    populateSpeakerCountOverrideOptions(recommendedCount, speakerCountOverride);
+
+    selectedCount = speakerCountOverride === "auto"
+      ? recommendedCount
+      : Math.max(1, Math.round(numValue(speakerCountOverride, recommendedCount)));
+
+    if (speakerCountOverride === "auto" || selectedCount === recommendedCount) {
+      selectedLayout = sscLayout;
+    } else {
+      // Ruční počet je vědomý zásah uživatele. Stále však držíme
+      // striktní X/Y mřížku; pouze hledáme nejlepší X/Y variantu
+      // pro explicitně zadaný počet.
+      selectedLayout = selectBestLayoutForCount({
+        count:selectedCount,
+        coverage,
+        room,
+        mode:"regular",
+        speaker,
+        targetSPL,
+        ambientNoise,
+        useCase,
+        voltage,
+        mountingHeightFt,
+        listenerHeightFt,
+        requestedTap:tapOverride,
+        quality:"full"
+      });
+    }
+
+    countRecommendation = {
+      recommendedCount,
+      chosen:sscLayout,
+      evaluated:[],
+      toleranceFloor:null,
+      targetMet:null,
+      source:"ssc"
+    };
+  } else {
+    // VYVÁŽENÉ / NEJLEPŠÍ POKRYTÍ = naše optimalizace.
+    // Zde dává smysl hledat nejmenší počet s požadovanou
+    // simulovanou kvalitou.
+    countRecommendation = recommendSpeakerCountAndLayout({
+      basePlacements,
+      coverage,
+      room,
+      mode:placementOptimizationMode,
+      speaker,
+      targetSPL,
+      ambientNoise,
+      useCase,
+      voltage,
+      mountingHeightFt,
+      listenerHeightFt,
+      requestedTap:tapOverride
+    });
+
+    if (!countRecommendation) {
+      alert("Pro zadané podmínky se nepodařilo najít vhodné rozmístění.");
+      return;
+    }
+
+    recommendedCount = countRecommendation.recommendedCount;
+    populateSpeakerCountOverrideOptions(recommendedCount, speakerCountOverride);
+
+    selectedCount = speakerCountOverride === "auto"
+      ? recommendedCount
+      : Math.max(1, Math.round(numValue(speakerCountOverride, recommendedCount)));
+
+    selectedLayout =
+      selectedCount === recommendedCount
+        ? countRecommendation.chosen
+        : selectBestLayoutForCount({
+            count:selectedCount,
+            coverage,
+            room,
+            mode:placementOptimizationMode,
+            speaker,
+            targetSPL,
+            ambientNoise,
+            useCase,
+            voltage,
+            mountingHeightFt,
+            listenerHeightFt,
+            requestedTap:tapOverride,
+            quality:"full"
+          });
   }
-
-  const recommendedCount = countRecommendation.recommendedCount;
-  populateSpeakerCountOverrideOptions(recommendedCount, speakerCountOverride);
-
-  const selectedCount = speakerCountOverride === "auto"
-    ? recommendedCount
-    : Math.max(1, Math.round(numValue(speakerCountOverride, recommendedCount)));
-
-  const selectedLayout =
-    selectedCount === recommendedCount
-      ? countRecommendation.chosen
-      : selectBestLayoutForCount({
-          count:selectedCount,
-          coverage,
-          room,
-          mode:placementOptimizationMode,
-          speaker,
-          targetSPL,
-          ambientNoise,
-          useCase,
-          voltage,
-          mountingHeightFt,
-          listenerHeightFt,
-          requestedTap:tapOverride
-        });
 
   if (!selectedLayout?.placements?.length) {
     alert("Zvolený počet reproduktorů se pro tento půdorys nepodařilo vhodně rozmístit.");
@@ -3756,13 +3837,24 @@ function calculate() {
   document.getElementById("spreadSplValue").textContent = `${heatmap.spread.toFixed(1)} dB`;
   const toleranceDb = Number(coverage.expectedSPLVariation) || 3;
   const splTolerancePct = calculateSplToleranceCoverage(heatmap, toleranceDb);
-  document.getElementById("splToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
-  document.getElementById("splToleranceValue").textContent = `${splTolerancePct.toFixed(0)} %`;
-  document.getElementById("technicalToleranceLabel").textContent = `Plocha v toleranci ±${toleranceDb} dB`;
-  document.getElementById("technicalToleranceAreaValue").textContent =
-    `${splTolerancePct.toFixed(0)} %${countRecommendation.targetMet ? "" : " • maximum nalezené"}`;
-  document.getElementById("technicalToleranceGoalValue").textContent =
-    `≥ 95 % plochy v ±${toleranceDb} dB`;
+  document.getElementById("splToleranceLabel").textContent =
+    `Simulovaná plocha v toleranci ±${toleranceDb} dB`;
+  document.getElementById("splToleranceValue").textContent =
+    `${splTolerancePct.toFixed(0)} %`;
+  document.getElementById("technicalToleranceLabel").textContent =
+    `Simulovaná plocha v toleranci ±${toleranceDb} dB`;
+
+  if (placementOptimizationMode === "regular") {
+    document.getElementById("technicalToleranceAreaValue").textContent =
+      `${splTolerancePct.toFixed(0)} %`;
+    document.getElementById("technicalToleranceGoalValue").textContent =
+      `100 % návrhové pokrytí podle SSC rozteče pro ±${toleranceDb} dB`;
+  } else {
+    document.getElementById("technicalToleranceAreaValue").textContent =
+      `${splTolerancePct.toFixed(0)} %${countRecommendation.targetMet ? "" : " • maximum nalezené"}`;
+    document.getElementById("technicalToleranceGoalValue").textContent =
+      `≥ 95 % simulované plochy v ±${toleranceDb} dB`;
+  }
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
   document.getElementById("roomAreaValue").textContent = `${room.areaM2.toFixed(1)} m²`;
@@ -3781,14 +3873,14 @@ function calculate() {
     "extended": "Rozšířené rozestupy"
   };
   document.getElementById("coverageModeValue").textContent =
-    `${coverageNames[coverageDensity] || coverage.densityLabel} / ±${coverage.expectedSPLVariation} dB`;
+    `${coverageNames[coverageDensity] || coverage.densityLabel} • návrhová tolerance ±${coverage.expectedSPLVariation} dB`;
   const optimizationImprovementText =
     Number.isFinite(placementOptimization.improvementPct)
       ? ` • geometrické zlepšení ${placementOptimization.improvementPct.toFixed(1).replace(".", ",")} %`
       : "";
 
   const optimizationModeLabels = {
-    regular: "Pravidelné – striktní mřížka X/Y",
+    regular: "Pravidelné – SSC mřížka X/Y",
     balanced: "Vyvážené – geometricky zarovnané",
     coverage: "Nejlepší pokrytí – volná optimalizace"
   };
@@ -3838,7 +3930,9 @@ function calculate() {
       : `Stropní • výška reproduktoru ${heightM.toFixed(1).replace(".", ",")} m`;
 
   document.getElementById("technicalRecommendedCountValue").textContent =
-    `${recommendedCount} ks`;
+    placementOptimizationMode === "regular"
+      ? `${recommendedCount} ks – SSC rozteč`
+      : `${recommendedCount} ks`;
 
   document.getElementById("technicalSelectedCountValue").textContent =
     speakerCountOverride === "auto"
@@ -3893,8 +3987,6 @@ document.getElementById("ambientNoisePreset").addEventListener("change", (e) => 
   document.getElementById("ambientCustomRow").classList.toggle("hidden", !custom);
   calculate();
 });
-
-document.getElementById("calculateBtn").addEventListener("click", calculate);
 
 document.getElementById("copySpeakerCoordinates")?.addEventListener("click", async () => {
   const text = getSpeakerCoordinatesText();

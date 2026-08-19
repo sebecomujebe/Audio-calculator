@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.109" />
+  <link rel="stylesheet" href="style.css?v=0.110" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.109</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.110</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -32,7 +32,7 @@
         <label class="placement-optimization-row">
           <span>Optimalizace rozmístění</span>
           <select id="placementOptimization">
-            <option value="regular">Pravidelné – priorita zarovnání</option>
+            <option value="regular">Pravidelné – SSC mřížka</option>
             <option value="balanced" selected>Vyvážené – zarovnání i pokrytí</option>
             <option value="coverage">Nejlepší pokrytí</option>
           </select>
@@ -258,10 +258,8 @@
           </label>
         </div>
 
-        <button id="calculateBtn" type="button">Vypočítat návrh</button>
-
         <p class="note">
-          Výsledek je orientační návrh založený na výpočtové logice systému. Finální instalace má být ověřena projektantem / instalační firmou.
+          Návrh se přepočítává automaticky po změně parametrů. Výsledek je orientační a finální instalace má být ověřena projektantem / instalační firmou.
         </p>
       </aside>
 
@@ -337,7 +335,7 @@
               <strong id="spreadSplValue">—</strong>
             </div>
             <div>
-              <span id="splToleranceLabel">Plocha v toleranci</span>
+              <span id="splToleranceLabel">Simulovaná plocha v toleranci</span>
               <strong id="splToleranceValue">—</strong>
             </div>
             <div>
@@ -455,8 +453,8 @@
                 <h3>Pokrytí</h3>
                 <dl class="technical-detail-list">
                   <div><dt>Režim pokrytí</dt><dd id="coverageModeValue">—</dd></div>
-                  <div><dt id="technicalToleranceLabel">Plocha v toleranci</dt><dd id="technicalToleranceAreaValue">—</dd></div>
-                  <div><dt>Cíl automatického návrhu</dt><dd id="technicalToleranceGoalValue">≥ 95 % plochy</dd></div>
+                  <div><dt id="technicalToleranceLabel">Simulovaná plocha v toleranci</dt><dd id="technicalToleranceAreaValue">—</dd></div>
+                  <div><dt>Návrhové kritérium počtu</dt><dd id="technicalToleranceGoalValue">—</dd></div>
                   <div><dt>Průměr pokrytí jednoho reproduktoru</dt><dd id="coverageDiameterValue">—</dd></div>
                   <div><dt>Efektivní vzdálenost k posluchači</dt><dd id="listenerDistanceValue">—</dd></div>
                   <div><dt>Výchozí návrhová rozteč X</dt><dd id="spacingXValue">—</dd></div>
@@ -591,6 +589,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.109"></script>
+  <script src="app.js?v=0.110"></script>
 </body>
 </html>
