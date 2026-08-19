@@ -2341,3 +2341,20 @@ input[type="number"]::-webkit-outer-spin-button {
 /* v0.123 – rollback kruhové optimalizace na stabilní v0.121. */
 
 /* v0.124 – kruhové prstence s přirozeným okrajem cca 1/2 rozteče. */
+
+/* v0.125 – radiální optimalizace kruhových prstenců při zachování coverage. */
+
+/* v0.126 – Zarovnaná symetricky odstraňuje nadbytečné vnitřní body. */
+
+
+/* v0.127 */
+.floor-speaker-count {
+  margin-top: 4px;
+  font-size: 0.88rem;
+  color: var(--muted, #9aa8b6);
+}
+
+.floor-speaker-count strong {
+  color: var(--text, #f4f7fb);
+  font-weight: 700;
+}

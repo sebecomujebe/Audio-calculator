@@ -1,4 +1,4 @@
-const APP_VERSION = "0.124";
+const APP_VERSION = "0.127";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -3026,13 +3026,6 @@ function buildCircleCoverageDesignCandidates(room, coverage) {
       placements:generateCircleRowFamily(
         room,targetSpacingM,0
       )
-    },
-    {
-      method:"Řady 45° v kruhu",
-      family:"rows-45",
-      placements:generateCircleRowFamily(
-        room,targetSpacingM,45
-      )
     }
   ];
 
@@ -3050,7 +3043,365 @@ function buildCircleCoverageDesignCandidates(room, coverage) {
     }));
 }
 
-function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned") {
+
+function scaleCircleRingPlacements(room, placements, scale) {
+  const R = room.diameterM/2;
+  const cx = R;
+  const cy = R;
+
+  return placements.map(p => {
+    const xM = p.x/FEET_PER_METER;
+    const yM = p.y/FEET_PER_METER;
+    const dx = xM-cx;
+    const dy = yM-cy;
+    const radius = Math.hypot(dx,dy);
+
+    // Středový reproduktor zůstává přesně ve středu.
+    if (radius < 1e-6) return {...p};
+
+    return {
+      x:(cx+dx*scale)*FEET_PER_METER,
+      y:(cy+dy*scale)*FEET_PER_METER
+    };
+  });
+}
+
+function optimizeCircleRingRadius(
+  candidate,
+  room,
+  coverage,
+  acousticContext
+) {
+  if (
+    !candidate?.placements?.length ||
+    !["rings-center","rings-no-center"].includes(candidate.family) ||
+    !acousticContext?.speaker
+  ) return candidate;
+
+  const R = room.diameterM/2;
+  const targetSpacingM = Math.max(
+    0.15,
+    coverage.targetSpacing/FEET_PER_METER
+  );
+
+  const radii = candidate.placements
+    .map(p => Math.hypot(
+      p.x/FEET_PER_METER-R,
+      p.y/FEET_PER_METER-R
+    ))
+    .filter(r => r > 1e-6);
+
+  if (!radii.length) return candidate;
+
+  const currentOuterRadiusM = Math.max(...radii);
+
+  // Půl rozteče je výchozí geometrická poloha, nikoli tvrdá hranice.
+  // Pokud coverage zůstává stejné, dovolíme jít až přibližně na
+  // 0,18 rozteče od stěny.
+  const minimumWallMarginM = Math.max(
+    0.15,
+    targetSpacingM*0.18
+  );
+  const maximumOuterRadiusM = Math.max(
+    currentOuterRadiusM,
+    R-minimumWallMarginM
+  );
+  const maximumScale = Math.max(
+    1,
+    maximumOuterRadiusM/
+      Math.max(0.01,currentOuterRadiusM)
+  );
+
+  const rawScales = [
+    0.88,0.94,0.98,1.00,
+    1.04,1.08,1.12,1.16,1.20,
+    maximumScale
+  ];
+
+  const scales = [...new Set(
+    rawScales
+      .map(v => Math.min(maximumScale,v))
+      .filter(v => v >= 0.80 && v <= maximumScale+1e-6)
+      .map(v => Number(v.toFixed(4)))
+  )].sort((a,b)=>a-b);
+
+  const {tap} = getEvaluationTap({
+    count:candidate.placements.length,
+    coverage,
+    speaker:acousticContext.speaker,
+    targetSPL:acousticContext.targetSPL,
+    ambientNoise:acousticContext.ambientNoise,
+    useCase:acousticContext.useCase,
+    voltage:acousticContext.voltage,
+    requestedTap:acousticContext.requestedTap
+  });
+
+  const toleranceDb = Number(
+    coverage.expectedSPLVariation
+  ) || 3;
+
+  const baselineCoverage = Number(
+    candidate.designCoveragePct
+  ) || 0;
+
+  const allowedCoverageLoss =
+    baselineCoverage >= 99.5
+      ? 0.10
+      : 0.20;
+
+  const variants = [];
+
+  for (const scale of scales) {
+    const placements = scaleCircleRingPlacements(
+      room,
+      candidate.placements,
+      scale
+    );
+
+    // Bezpečnostní kontrola okraje.
+    const outerRadiusM = Math.max(
+      ...placements.map(p => Math.hypot(
+        p.x/FEET_PER_METER-R,
+        p.y/FEET_PER_METER-R
+      ))
+    );
+    if (outerRadiusM > R-minimumWallMarginM+1e-6) {
+      continue;
+    }
+
+    const designCoveragePct = circleDesignCoveragePct(
+      room,
+      placements,
+      coverage
+    );
+
+    // Coverage se nesmí prakticky zhoršit.
+    if (
+      designCoveragePct <
+      baselineCoverage-allowedCoverageLoss
+    ) {
+      continue;
+    }
+
+    const acoustic = quickAcousticMetrics({
+      placements,
+      room,
+      mountingHeightFt:acousticContext.mountingHeightFt,
+      listenerHeightFt:acousticContext.listenerHeightFt,
+      speaker:acousticContext.speaker,
+      tap,
+      targetSPL:acousticContext.targetSPL,
+      toleranceDb,
+      sampleCount:420
+    });
+
+    variants.push({
+      scale,
+      placements,
+      designCoveragePct,
+      acoustic
+    });
+  }
+
+  if (!variants.length) return candidate;
+
+  // Coverage je vstupní podmínka. Potom chceme zvednout nejslabší místa,
+  // zmenšit rozdíl max–min a teprve poté zvýšit průměrné SPL.
+  variants.sort((a,b) =>
+    b.acoustic.min-a.acoustic.min ||
+    a.acoustic.spread-b.acoustic.spread ||
+    b.acoustic.average-a.acoustic.average ||
+    b.designCoveragePct-a.designCoveragePct ||
+    Math.abs(a.scale-1)-Math.abs(b.scale-1)
+  );
+
+  const best = variants[0];
+  const scalePct = (best.scale-1)*100;
+
+  return {
+    ...candidate,
+    placements:best.placements,
+    designCoveragePct:best.designCoveragePct,
+    acoustic:best.acoustic,
+    radialScale:best.scale,
+    method:
+      Math.abs(scalePct) >= 0.5
+        ? `${candidate.method} • radiální posun ${scalePct>0?"+":""}${scalePct.toFixed(0)} %`
+        : candidate.method
+  };
+}
+
+
+function circleAlignedRequiredCoveragePct(coverage) {
+  const toleranceDb = Number(
+    coverage?.expectedSPLVariation || 3
+  );
+
+  if (toleranceDb <= 1) return 99.5;
+  if (toleranceDb <= 2) return 99.0;
+  if (toleranceDb <= 3) return 98.0;
+  if (toleranceDb <= 4) return 97.0;
+  return 95.0;
+}
+
+function circleAlignedSymmetryKey(room, placement) {
+  const R = room.diameterM/2;
+  const xM = placement.x/FEET_PER_METER - R;
+  const yM = placement.y/FEET_PER_METER - R;
+
+  const ax = Math.abs(xM);
+  const ay = Math.abs(yM);
+  const a = Math.min(ax,ay);
+  const b = Math.max(ax,ay);
+
+  return `${a.toFixed(3)}|${b.toFixed(3)}`;
+}
+
+function buildCircleAlignedSymmetryGroups(room, placements) {
+  const groups = new Map();
+
+  for (let i=0; i<placements.length; i++) {
+    const key = circleAlignedSymmetryKey(
+      room,
+      placements[i]
+    );
+
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+
+  return [...groups.values()]
+    .filter(group => group.length >= 2);
+}
+
+function pruneCircleAlignedCandidate(
+  candidate,
+  room,
+  coverage
+) {
+  if (
+    !candidate?.placements?.length ||
+    candidate.family !== "rows-0"
+  ) return candidate;
+
+  const requiredCoveragePct =
+    circleAlignedRequiredCoveragePct(coverage);
+
+  let currentPlacements = candidate.placements.map(p => ({...p}));
+  let currentCoverage = circleDesignCoveragePct(
+    room,
+    currentPlacements,
+    coverage
+  );
+
+  if (currentCoverage < requiredCoveragePct) {
+    return {
+      ...candidate,
+      requiredDesignCoveragePct:requiredCoveragePct
+    };
+  }
+
+  let removedTotal = 0;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    const groups = buildCircleAlignedSymmetryGroups(
+      room,
+      currentPlacements
+    );
+
+    const R = room.diameterM/2;
+
+    groups.sort((ga,gb) => {
+      const radiusOf = group => {
+        const p = currentPlacements[group[0]];
+        return Math.hypot(
+          p.x/FEET_PER_METER-R,
+          p.y/FEET_PER_METER-R
+        );
+      };
+      return radiusOf(ga)-radiusOf(gb);
+    });
+
+    let bestRemoval = null;
+
+    for (const group of groups) {
+      if (group.length > 4) continue;
+
+      const removeSet = new Set(group);
+
+      const proposal = currentPlacements.filter(
+        (_,index) => !removeSet.has(index)
+      );
+
+      if (proposal.length < 4) continue;
+
+      const coveragePct = circleDesignCoveragePct(
+        room,
+        proposal,
+        coverage
+      );
+
+      if (coveragePct < requiredCoveragePct) continue;
+
+      const geometryScore = circlePlacementGeometryScore(
+        room,
+        proposal,
+        Math.max(
+          0.15,
+          coverage.targetSpacing/FEET_PER_METER
+        )
+      );
+
+      const option = {
+        group,
+        proposal,
+        coveragePct,
+        geometryScore
+      };
+
+      if (
+        !bestRemoval ||
+        group.length > bestRemoval.group.length ||
+        (
+          group.length === bestRemoval.group.length &&
+          coveragePct > bestRemoval.coveragePct+0.05
+        ) ||
+        (
+          group.length === bestRemoval.group.length &&
+          Math.abs(coveragePct-bestRemoval.coveragePct) <= 0.05 &&
+          geometryScore < bestRemoval.geometryScore
+        )
+      ) {
+        bestRemoval = option;
+      }
+    }
+
+    if (bestRemoval) {
+      currentPlacements = bestRemoval.proposal;
+      currentCoverage = bestRemoval.coveragePct;
+      removedTotal += bestRemoval.group.length;
+      changed = true;
+    }
+  }
+
+  return {
+    ...candidate,
+    placements:currentPlacements,
+    count:currentPlacements.length,
+    designCoveragePct:currentCoverage,
+    requiredDesignCoveragePct:requiredCoveragePct,
+    removedSymmetricCount:removedTotal,
+    method:
+      removedTotal > 0
+        ? `${candidate.method} • symetricky odebráno ${removedTotal} ks`
+        : candidate.method
+  };
+}
+
+function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
   const allCandidates = buildCircleCoverageDesignCandidates(
     room,coverage
   );
@@ -3058,21 +3409,36 @@ function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned
   const allowedFamilies =
     circleMode === "circle-rings"
       ? new Set(["rings-center","rings-no-center"])
-      : new Set(["rows-0","rows-45"]);
+      : new Set(["rows-0"]);
 
-  const candidates = allCandidates.filter(c =>
+  let candidates = allCandidates.filter(c =>
     allowedFamilies.has(c.family)
   );
 
+  if (circleMode === "circle-aligned") {
+    candidates = candidates.map(c =>
+      pruneCircleAlignedCandidate(
+        c,
+        room,
+        coverage
+      )
+    );
+  }
+
   if (!candidates.length) return null;
 
-  // Přednost má nejmenší geometrická konfigurace s prakticky plným
-  // návrhovým pokrytím footprinty. Když 100 % není dosažitelné,
-  // vezmeme nejlepší pokrytí a až potom menší počet.
+  const requiredCoveragePct =
+    circleMode === "circle-aligned"
+      ? circleAlignedRequiredCoveragePct(coverage)
+      : 99.5;
+
   const complete = candidates
-    .filter(c=>c.designCoveragePct>=99.5)
+    .filter(c =>
+      c.designCoveragePct >= requiredCoveragePct
+    )
     .sort((a,b)=>
       a.count-b.count ||
+      b.designCoveragePct-a.designCoveragePct ||
       a.geometryScore-b.geometryScore
     );
 
@@ -3084,13 +3450,25 @@ function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned
         a.geometryScore-b.geometryScore
       )[0];
 
+  const optimized =
+    circleMode === "circle-rings"
+      ? optimizeCircleRingRadius(
+          chosen,
+          room,
+          coverage,
+          acousticContext
+        )
+      : chosen;
+
   return {
-    ...chosen,
+    ...optimized,
+    requiredDesignCoveragePct:
+      optimized.requiredDesignCoveragePct ??
+      requiredCoveragePct,
     clearanceM:recommendedWallClearanceMeters(
       coverage,room
     ),
     isStructuredLattice:true,
-    acoustic:null,
     score:0,
     source:"circle-coverage"
   };
@@ -5003,7 +5381,7 @@ function calculate() {
 
   if (room.shape === "circle") {
     // Kruh: jen dvě geometrické rodiny.
-    // Zarovnaná = striktně řady 0° nebo 45°.
+    // Zarovnaná = striktně mřížka 0°.
     // Kruhová = soustředné prstence, se středem nebo bez středu.
     const circleMode =
       placementOptimizationMode === "circle-rings"
@@ -5013,7 +5391,17 @@ function calculate() {
     const circleDesign = chooseCircleCoverageDesign(
       room,
       coverage,
-      circleMode
+      circleMode,
+      {
+        speaker,
+        targetSPL,
+        ambientNoise,
+        useCase,
+        voltage,
+        mountingHeightFt,
+        listenerHeightFt,
+        requestedTap:tapOverride
+      }
     );
 
     if (!circleDesign?.placements?.length) {
@@ -5033,7 +5421,10 @@ function calculate() {
       targetMet:null,
       source:"circle-coverage",
       optimizationPolicy:null,
-      circleDesignCoveragePct:circleDesign.designCoveragePct
+      circleDesignCoveragePct:circleDesign.designCoveragePct,
+      circleRadialScale:circleDesign.radialScale || 1,
+      circleRequiredCoveragePct:circleDesign.requiredDesignCoveragePct,
+      circleRemovedSymmetricCount:circleDesign.removedSymmetricCount || 0
     };
   } else {
     const sscLayout = getSscRegularAutomaticLayout(
@@ -5183,6 +5574,10 @@ function calculate() {
   document.getElementById("resultTitle").textContent = speaker.model;
   updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${effectiveCoverage.count} ks`;
+  const floorSpeakerCount = document.getElementById("floorSpeakerCount");
+  if (floorSpeakerCount) {
+    floorSpeakerCount.textContent = `${effectiveCoverage.count} ks`;
+  }
   document.getElementById("layoutValue").textContent = placementOptimization.method;
   document.getElementById("tapValue").textContent = `${selectedTap} W`;
   document.getElementById("listenerSplValue").textContent = `${listenerSPL.toFixed(1)} dB`;
@@ -5206,11 +5601,36 @@ function calculate() {
     const circlePct = Number(
       countRecommendation.circleDesignCoveragePct
     );
+    const radialScale = Number(
+      countRecommendation.circleRadialScale
+    );
+    const requiredCirclePct = Number(
+      countRecommendation.circleRequiredCoveragePct
+    );
+    const removedSymmetricCount = Number(
+      countRecommendation.circleRemovedSymmetricCount || 0
+    );
+
     document.getElementById("technicalToleranceGoalValue").textContent =
-      `Kruh: coverage footprinty pro ±${toleranceDb} dB • ${recommendedCount} ks • okraj cca ½ rozteče` +
+      `Kruh: coverage footprinty pro ±${toleranceDb} dB • ${recommendedCount} ks` +
       (
         Number.isFinite(circlePct)
           ? ` • návrhově pokryto ${circlePct.toFixed(1)} % plochy`
+          : ""
+      ) +
+      (
+        Number.isFinite(requiredCirclePct)
+          ? ` • minimum ${requiredCirclePct.toFixed(1)} %`
+          : ""
+      ) +
+      (
+        removedSymmetricCount > 0
+          ? ` • symetricky odebráno ${removedSymmetricCount} ks`
+          : ""
+      ) +
+      (
+        Number.isFinite(radialScale) && Math.abs(radialScale-1) >= 0.005
+          ? ` • radiální posun ${((radialScale-1)*100).toFixed(0)} %`
           : ""
       );
   } else {
@@ -5243,7 +5663,7 @@ function calculate() {
 
   const optimizationModeLabels = {
     regular: "Pevná mřížka – striktní X/Y",
-    "circle-aligned": "Zarovnaná – řady 0° / 45°",
+    "circle-aligned": "Zarovnaná – mřížka 0°",
     "circle-rings": "Kruhová – soustředné prstence",
     balanced: "Vyvážené – vždy geometrická síť",
     coverage: "Nejlepší pokrytí – volná optimalizace"
