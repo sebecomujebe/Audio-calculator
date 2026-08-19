@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.110" />
+  <link rel="stylesheet" href="style.css?v=0.111" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.110</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.111</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -32,7 +32,7 @@
         <label class="placement-optimization-row">
           <span>Optimalizace rozmístění</span>
           <select id="placementOptimization">
-            <option value="regular">Pravidelné – SSC mřížka</option>
+            <option value="regular">Pevná mřížka</option>
             <option value="balanced" selected>Vyvážené – zarovnání i pokrytí</option>
             <option value="coverage">Nejlepší pokrytí</option>
           </select>
@@ -351,7 +351,23 @@
               <div class="eyebrow">PŮDORYS</div>
               <h2>Rozmístění reproduktorů</h2>
             </div>
-            
+
+            <div class="floor-plan-controls">
+              <label class="floor-plan-control">
+                <span>Počet reproduktorů</span>
+                <select id="speakerCountOverrideFloor">
+                  <option value="auto">Automaticky – doporučený počet</option>
+                </select>
+              </label>
+              <label class="floor-plan-control">
+                <span>Optimalizace</span>
+                <select id="placementOptimizationFloor">
+                  <option value="regular">Pevná mřížka</option>
+                  <option value="balanced">Vyvážené – zarovnání i pokrytí</option>
+                  <option value="coverage">Nejlepší pokrytí</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           <div id="floorPlanWrap" class="floor-wrap">
@@ -589,6 +605,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.110"></script>
+  <script src="app.js?v=0.111"></script>
 </body>
 </html>

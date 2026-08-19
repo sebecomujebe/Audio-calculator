@@ -1,4 +1,4 @@
-const APP_VERSION = "0.110";
+const APP_VERSION = "0.111";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -677,6 +677,56 @@ function roomClipPath(room, ox, oy, scale, clipId) {
   return `<clipPath id="${clipId}"><rect x="${ox}" y="${oy}" width="${room.widthM*scale}" height="${room.lengthM*scale}" rx="4"/></clipPath>`;
 }
 
+
+function setSelectValueIfPresent(select, value) {
+  if (!select) return;
+  if ([...select.options].some(o => o.value === value && !o.disabled)) {
+    select.value = value;
+  }
+}
+
+function syncFloorControlsFromMain() {
+  const countMain = document.getElementById("speakerCountOverride");
+  const countFloor = document.getElementById("speakerCountOverrideFloor");
+  if (countMain && countFloor) {
+    countFloor.value = countMain.value;
+  }
+
+  const optimizationMain = document.getElementById("placementOptimization");
+  const optimizationFloor = document.getElementById("placementOptimizationFloor");
+  if (optimizationMain && optimizationFloor) {
+    setSelectValueIfPresent(optimizationFloor, optimizationMain.value);
+  }
+}
+
+function updatePlacementOptimizationAvailability() {
+  const shape = document.getElementById("roomShape")?.value || "rectangle";
+  const isCircle = shape === "circle";
+
+  const selects = [
+    document.getElementById("placementOptimization"),
+    document.getElementById("placementOptimizationFloor")
+  ].filter(Boolean);
+
+  for (const select of selects) {
+    const regularOption = [...select.options].find(o => o.value === "regular");
+    if (regularOption) {
+      regularOption.hidden = isCircle;
+      regularOption.disabled = isCircle;
+    }
+
+    if (isCircle && select.value === "regular") {
+      select.value = "balanced";
+    }
+  }
+
+  const main = document.getElementById("placementOptimization");
+  const floor = document.getElementById("placementOptimizationFloor");
+  if (main && floor) {
+    setSelectValueIfPresent(floor, main.value);
+  }
+}
+
 function updateRoomShapeUi() {
   const shape = document.getElementById("roomShape")?.value || "rectangle";
 
@@ -710,6 +760,8 @@ function updateRoomShapeUi() {
       roomGrid.insertBefore(heightRow, ambientNoiseRow);
     }
   }
+
+  updatePlacementOptimizationAvailability();
 }
 function calculatePlacements(coverage, room = null) {
   const points = [];
@@ -2017,8 +2069,8 @@ function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
     placements: basePlacements.map(p => ({...p})),
     method:
       room.shape === "rectangle"
-        ? `SSC mřížka ${coverage.columns} × ${coverage.rows}`
-        : "SSC mřížka X/Y oříznutá tvarem místnosti",
+        ? `Pevná mřížka ${coverage.columns} × ${coverage.rows}`
+        : "Pevná mřížka X/Y oříznutá tvarem místnosti",
     clearanceM,
     alignmentWeight: 3,
     acoustic: null,
@@ -2154,10 +2206,17 @@ function recommendSpeakerCountAndLayout(args) {
 }
 
 function populateSpeakerCountOverrideOptions(recommendedCount, currentValue = "auto") {
-  const select = document.getElementById("speakerCountOverride");
-  if (!select) return;
+  const selects = [
+    document.getElementById("speakerCountOverride"),
+    document.getElementById("speakerCountOverrideFloor")
+  ].filter(Boolean);
+  if (!selects.length) return;
 
-  const currentNumeric = currentValue !== "auto" ? Math.max(1, Math.round(numValue(currentValue, 1))) : null;
+  const currentNumeric =
+    currentValue !== "auto"
+      ? Math.max(1, Math.round(numValue(currentValue, 1)))
+      : null;
+
   const maxCount = Math.min(
     300,
     Math.max(
@@ -2168,27 +2227,32 @@ function populateSpeakerCountOverrideOptions(recommendedCount, currentValue = "a
     )
   );
 
-  select.innerHTML = "";
+  for (const select of selects) {
+    select.innerHTML = "";
 
-  const auto = document.createElement("option");
-  auto.value = "auto";
-  auto.textContent = `Automaticky – ${recommendedCount} ks (doporučeno)`;
-  select.appendChild(auto);
+    const auto = document.createElement("option");
+    auto.value = "auto";
+    auto.textContent = `Automaticky – ${recommendedCount} ks (doporučeno)`;
+    select.appendChild(auto);
 
-  for (let count=1; count<=maxCount; count++) {
-    const option = document.createElement("option");
-    option.value = String(count);
-    option.textContent =
-      count === recommendedCount
-        ? `${count} ks – doporučeno`
-        : `${count} ks`;
-    select.appendChild(option);
-  }
+    for (let count=1; count<=maxCount; count++) {
+      const option = document.createElement("option");
+      option.value = String(count);
+      option.textContent =
+        count === recommendedCount
+          ? `${count} ks – doporučeno`
+          : `${count} ks`;
+      select.appendChild(option);
+    }
 
-  if (currentValue !== "auto" && [...select.options].some(o => o.value === String(currentValue))) {
-    select.value = String(currentValue);
-  } else {
-    select.value = "auto";
+    if (
+      currentValue !== "auto" &&
+      [...select.options].some(o => o.value === String(currentValue))
+    ) {
+      select.value = String(currentValue);
+    } else {
+      select.value = "auto";
+    }
   }
 }
 
@@ -3880,7 +3944,7 @@ function calculate() {
       : "";
 
   const optimizationModeLabels = {
-    regular: "Pravidelné – SSC mřížka X/Y",
+    regular: "Pevná mřížka – striktní X/Y",
     balanced: "Vyvážené – geometricky zarovnané",
     coverage: "Nejlepší pokrytí – volná optimalizace"
   };
@@ -3931,7 +3995,7 @@ function calculate() {
 
   document.getElementById("technicalRecommendedCountValue").textContent =
     placementOptimizationMode === "regular"
-      ? `${recommendedCount} ks – SSC rozteč`
+      ? `${recommendedCount} ks – pevná mřížka`
       : `${recommendedCount} ks`;
 
   document.getElementById("technicalSelectedCountValue").textContent =
@@ -3970,12 +4034,32 @@ function calculate() {
     listenerSPL
   });
   drawAllSectionViews();
+  syncFloorControlsFromMain();
 }
 
 populateSpeakerOverrideOptions();
 
 document.getElementById("speakerOverride").addEventListener("change", calculate);
-document.getElementById("speakerCountOverride")?.addEventListener("change", calculate);
+document.getElementById("speakerCountOverride")?.addEventListener("change", () => {
+  const floor = document.getElementById("speakerCountOverrideFloor");
+  if (floor) floor.value = document.getElementById("speakerCountOverride").value;
+  calculate();
+});
+
+document.getElementById("speakerCountOverrideFloor")?.addEventListener("change", () => {
+  const main = document.getElementById("speakerCountOverride");
+  const floor = document.getElementById("speakerCountOverrideFloor");
+  if (main && floor) main.value = floor.value;
+  calculate();
+});
+
+document.getElementById("placementOptimizationFloor")?.addEventListener("change", () => {
+  const main = document.getElementById("placementOptimization");
+  const floor = document.getElementById("placementOptimizationFloor");
+  if (main && floor) main.value = floor.value;
+  updatePlacementOptimizationAvailability();
+  calculate();
+});
 
 document.getElementById("speakerType").addEventListener("change", () => {
   updateSpeakerTypeUi();
@@ -4107,6 +4191,10 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
   .forEach(id => {
     document.getElementById(id).addEventListener("change", () => {
       if (id === "secondCutEnabled") updateRoomShapeUi();
+      if (id === "placementOptimization") {
+        updatePlacementOptimizationAvailability();
+        syncFloorControlsFromMain();
+      }
       if (["length","width","lCutSide","lCutWidth","lCutLength","lCutOffset","secondCutEnabled","lCutSide2","lCutWidth2","lCutLength2","lCutOffset2","diameter"].includes(id)) {
         appState.listenerXFt = null;
         appState.listenerYFt = null;
@@ -4187,6 +4275,8 @@ svg.addEventListener("pointercancel", () => {
 async function initializeApp() {
   updateRoomShapeUi();
   updateSpeakerTypeUi();
+  updatePlacementOptimizationAvailability();
+  syncFloorControlsFromMain();
   setDataSourceStatus("fallback", "Načítám živá data…");
   try {
     await loadLiveData();
