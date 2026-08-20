@@ -1,4 +1,4 @@
-const APP_VERSION = "0.145";
+const APP_VERSION = "0.146";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -726,11 +726,12 @@ function updatePlacementOptimizationAvailability() {
   let preferred = previous;
 
   if (shape === "rectangle") {
+    // Obdélník používá výhradně referenční SSC mřížku. Volba rozmístění
+    // se v UI skryje; kruh a speciální tvar si své volby ponechávají.
     options = [
-      {value:"regular", label:"Mřížka"},
-      {value:"rect-optimized", label:"Optimalizovaná"}
+      {value:"regular", label:"Mřížka"}
     ];
-    if (!["regular","rect-optimized"].includes(preferred)) preferred = "regular";
+    preferred = "regular";
   } else if (shape === "circle") {
     options = [
       {value:"circle-aligned", label:"Zarovnaná"},
@@ -755,6 +756,12 @@ function updatePlacementOptimizationAvailability() {
       preferred = "balanced";
     }
   }
+
+  const mainRow = main?.closest(".placement-optimization-row");
+  const floorRow = floor?.closest(".floor-plan-control");
+  const hidePlacementChoice = shape === "rectangle";
+  mainRow?.classList.toggle("hidden", hidePlacementChoice);
+  floorRow?.classList.toggle("hidden", hidePlacementChoice);
 
   fillPlacementModeSelect(main, options, preferred);
   fillPlacementModeSelect(floor, options, main?.value || preferred);
@@ -5266,9 +5273,6 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
         <circle cx="${cx}" cy="${cy}" r="${iconSize / 2}"
           fill="none" stroke="${ringStroke}" stroke-width="${ringWidth}"/>
         <text x="${cx}" y="${cy + 27}" text-anchor="middle" fill="#d0d7df" font-size="10">${idx + 1}</text>
-        <text x="${cx}" y="${cy + 41}" text-anchor="middle" fill="#f4f7fb" font-size="10" font-weight="700">
-          ${appState.latest?.power?.singleSpeakerSPL?.toFixed(1) ?? "—"} dB
-        </text>
       </g>`;
   }).join("");
 
@@ -5505,30 +5509,41 @@ function drawSectionView({
     const strongestInfluence = group.items.some(item => item.influence === "strong")
       ? "strong"
       : group.items.some(item => item.influence === "medium") ? "medium" : "low";
-    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.82 : 0.58;
-    const labelY = Math.max(18, speakerY - 17);
-    const chipW = 24;
-    const chipH = 21;
-    const chipGap = 3;
-    const totalW = orderedItems.length * chipW + Math.max(0, orderedItems.length - 1) * chipGap;
+    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.88 : 0.64;
+    const labelY = Math.max(23, speakerY - 18);
+    const cellW = 28;
+    const cellH = 24;
+    const totalW = orderedItems.length * cellW;
     const startX = group.cx - totalW / 2;
+    const boxY = labelY - cellH + 5;
 
-    const chips = orderedItems.map((item, idx) => {
+    const separators = orderedItems.slice(1).map((_, idx) => {
+      const x = startX + (idx + 1) * cellW;
+      return `<line x1="${x}" y1="${boxY + 5}" x2="${x}" y2="${boxY + cellH - 5}"
+        stroke="#4b5866" stroke-width="1"/>`;
+    }).join("");
+
+    const cells = orderedItems.map((item, idx) => {
       const isNearest = nearest && item.index === nearest.index;
-      const x = startX + idx * (chipW + chipGap);
-      const fill = isNearest ? "#ff7a1a" : "#17212b";
-      const stroke = isNearest ? "#ffd5b8" : "#596573";
-      const textFill = isNearest ? "#101820" : "#e1e7ee";
+      const x = startX + idx * cellW;
       return `
-        <g opacity="${isNearest ? 1 : opacity}">
-          <rect x="${x}" y="${labelY-chipH+4}" width="${chipW}" height="${chipH}" rx="6"
-            fill="${fill}" stroke="${stroke}" stroke-width="${isNearest ? 1.6 : 1}"/>
-          <text x="${x+chipW/2}" y="${labelY}" text-anchor="middle"
-            fill="${textFill}" font-size="${isNearest ? 14 : 13}" font-weight="${isNearest ? 900 : 800}">${item.index + 1}</text>
+        <g>
+          ${isNearest ? `<rect x="${x + 2}" y="${boxY + 2}" width="${cellW - 4}" height="${cellH - 4}" rx="6"
+            fill="#ff7a1a" stroke="#ffd7ba" stroke-width="1.4"/>` : ""}
+          <text x="${x + cellW/2}" y="${labelY}" text-anchor="middle"
+            fill="${isNearest ? "#101820" : "#eef3f8"}" font-size="${isNearest ? 15 : 14}"
+            font-weight="${isNearest ? 900 : 800}">${item.index + 1}</text>
+          ${isNearest ? `<path d="M ${x + cellW/2 - 4} ${boxY + cellH + 2} L ${x + cellW/2} ${boxY + cellH + 7} L ${x + cellW/2 + 4} ${boxY + cellH + 2} Z" fill="#ff7a1a"/>` : ""}
         </g>`;
     }).join("");
 
-    return `<g class="section-speaker-number-group">${chips}</g>`;
+    return `
+      <g class="section-speaker-number-group" opacity="${opacity}">
+        <rect x="${startX}" y="${boxY}" width="${totalW}" height="${cellH}" rx="8"
+          fill="#101820" fill-opacity="0.94" stroke="#596573" stroke-width="1.1"/>
+        ${separators}
+        ${cells}
+      </g>`;
   }).join("");
 
   const listenerCx = ox + listenerAxisM * pxPerMeter;
