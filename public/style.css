@@ -2487,3 +2487,70 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: rgba(255,255,255,.26) !important;
 }
 .floor-view-direction text { letter-spacing: .02em; }
+
+
+/* v0.144 – zarovnání audio ovládání, plný rozsah hlasitosti a výraznější popis půdorysu */
+.floor-speaker-count {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+.floor-speaker-count strong {
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+.floor-speaker-model-separator {
+  padding: 0 .18em;
+  color: var(--muted, #9aa8b6);
+  font-weight: 700;
+}
+
+.floor-audio-tools > .audio-play-button,
+.floor-audio-tools > .audio-file-label {
+  align-self: center;
+  vertical-align: middle;
+}
+
+/* Vlastní range styl: dráha využívá skutečně celou šířku prvku a 100 % je vizuálně na pravém konci. */
+.audio-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.audio-volume::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: #6f7882;
+}
+.audio-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 0;
+  background: #ff7a1a;
+  margin-top: -4.5px;
+}
+.audio-volume::-moz-range-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: #6f7882;
+}
+.audio-volume::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: #ff7a1a;
+}
+.audio-volume::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 0;
+  background: #ff7a1a;
+}

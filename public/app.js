@@ -5404,17 +5404,27 @@ function drawSectionView({
     });
 
   const speakerNumberLabelsSvg = projectedSpeakerGroups.map(group => {
-    const numbers = group.items.map(item => item.index + 1).sort((a, b) => a - b).join(", ");
+    const orderedItems = [...group.items].sort((a, b) => a.index - b.index);
+    const nearest = orderedItems.reduce((best, item) =>
+      !best || item.horizontalM < best.horizontalM ? item : best, null);
     const strongestInfluence = group.items.some(item => item.influence === "strong")
       ? "strong"
       : group.items.some(item => item.influence === "medium") ? "medium" : "low";
-    const fill = strongestInfluence === "strong" ? "#ffd9bd"
+    const baseFill = strongestInfluence === "strong" ? "#ffd9bd"
       : strongestInfluence === "medium" ? "#c9a78e" : "#8e98a5";
-    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.72 : 0.48;
-    const labelY = Math.max(14, speakerY - 12);
+    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.78 : 0.55;
+    const labelY = Math.max(17, speakerY - 13);
+    const parts = orderedItems.map((item, idx) => {
+      const isNearest = nearest && item.index === nearest.index;
+      const separator = idx ? `<tspan fill="${baseFill}" font-weight="700">, </tspan>` : "";
+      const number = isNearest
+        ? `<tspan fill="#ff8b35" font-size="14.5" font-weight="900">${item.index + 1}</tspan>`
+        : `<tspan fill="${baseFill}" font-size="12.5" font-weight="750">${item.index + 1}</tspan>`;
+      return separator + number;
+    }).join("");
     return `<text x="${group.cx}" y="${labelY}" text-anchor="middle"
-      fill="${fill}" opacity="${opacity}" font-size="10.5" font-weight="700"
-      paint-order="stroke" stroke="#0d131a" stroke-width="3" stroke-linejoin="round">${numbers}</text>`;
+      opacity="${opacity}" font-size="12.5" font-weight="750"
+      paint-order="stroke" stroke="#0d131a" stroke-width="3.2" stroke-linejoin="round">${parts}</text>`;
   }).join("");
 
   const listenerCx = ox + listenerAxisM * pxPerMeter;
