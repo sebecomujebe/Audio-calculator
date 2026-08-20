@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.130" />
+  <link rel="stylesheet" href="style.css?v=0.140" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.130</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.140</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -483,6 +483,7 @@
                   <div><dt>Doporučený počet</dt><dd id="technicalRecommendedCountValue">—</dd></div>
                   <div><dt>Zvolený počet</dt><dd id="technicalSelectedCountValue">—</dd></div>
                   <div><dt>Typická skutečná rozteč</dt><dd id="spacingSummaryValue">—</dd></div>
+                  <div><dt>Nejosamělejší reproduktor</dt><dd id="loneliestSpeakerValue">—</dd></div>
                   <div><dt>Minimální návrhový odstup od stěny</dt><dd id="technicalWallClearanceValue">—</dd></div>
                   <div id="technicalBalancedHoleRow"><dt>Největší souvislá plocha mimo toleranci</dt><dd id="technicalBalancedHoleValue">—</dd></div>
                   <div id="technicalBalancedSpacingRow"><dt>Vyváženost roztečí</dt><dd id="technicalBalancedSpacingValue">—</dd></div>
@@ -605,6 +606,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.130"></script>
+  <script src="app.js?v=0.140"></script>
 </body>
 </html>

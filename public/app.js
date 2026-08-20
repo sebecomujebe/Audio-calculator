@@ -1,4 +1,4 @@
-const APP_VERSION = "0.130";
+const APP_VERSION = "0.140";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -2881,90 +2881,329 @@ function circlePlacementGeometryScore(room, placements, targetSpacingM) {
   return spread*2.0 + spacingPenalty + boundaryPenalty/pts.length;
 }
 
-function generateCircleRingFamily(room, targetSpacingM, centerSpeaker) {
-  const R = room.diameterM/2;
+function circleRingNeighborCount(radiusM, targetSpacingM) {
+  if (!(radiusM > 0)) return 0;
+  const ratio = Math.min(1, targetSpacingM / Math.max(0.0001, 2 * radiusM));
+  if (ratio >= 1) return 3;
+  return Math.max(3, Math.ceil(Math.PI / Math.asin(ratio)));
+}
+
+function buildCircleRingSpec(room, targetSpacingM, centerSpeaker) {
+  const R = room.diameterM / 2;
+  const preferredWallMarginM = targetSpacingM * 0.50;
+  const outerRadiusM = Math.max(0, R - preferredWallMarginM);
+
+  if (outerRadiusM < 0.05) {
+    return {
+      centerSpeaker: true,
+      radiiM: [],
+      counts: []
+    };
+  }
+
+  // Rozdělíme poloměr tak, aby radiální rozteč nikdy nebyla větší než
+  // rozteč referenční SSC mřížky a poslední prstenec zůstal cca S/2 od stěny.
+  const ringCount = Math.max(1, Math.ceil(outerRadiusM / targetSpacingM));
+  const radialPitchM = outerRadiusM / ringCount;
+  const radiiM = [];
+  const counts = [];
+
+  for (let i = 1; i <= ringCount; i++) {
+    const radiusM = radialPitchM * i;
+    radiiM.push(radiusM);
+    counts.push(circleRingNeighborCount(radiusM, targetSpacingM));
+  }
+
+  return { centerSpeaker, radiiM, counts };
+}
+
+function materializeCircleRingSpec(room, spec) {
+  const R = room.diameterM / 2;
   const cx = R;
   const cy = R;
   const placements = [];
 
-  if (centerSpeaker) {
+  if (spec.centerSpeaker) {
     placements.push({
-      x:cx*FEET_PER_METER,
-      y:cy*FEET_PER_METER
+      x: cx * FEET_PER_METER,
+      y: cy * FEET_PER_METER
     });
   }
 
-  // Přirozený okrajový odstup:
-  // stejně jako u mřížky nechceme středy krajních reproduktorů
-  // téměř na stěně. Cíl je přibližně polovina návrhové rozteče.
-  const preferredWallMarginM = targetSpacingM*0.50;
-  const maximumRingRadiusM = Math.max(
-    0,
-    R-preferredWallMarginM
-  );
+  for (let ringIndex = 0; ringIndex < spec.radiiM.length; ringIndex++) {
+    const radiusM = spec.radiiM[ringIndex];
+    const n = Math.max(3, Math.round(spec.counts[ringIndex] || 3));
+    const phase = (ringIndex % 2) ? Math.PI / n : 0;
 
-  // První prstenec.
-  const firstRadius =
-    centerSpeaker
-      ? targetSpacingM
-      : Math.max(
-          targetSpacingM*0.55,
-          targetSpacingM/Math.sqrt(3)
-        );
-
-  // Pokud je místnost příliš malá na standardní prstenec,
-  // použijeme jeden menší prstenec, ale stále jej nedáme na obvod.
-  if (
-    maximumRingRadiusM > targetSpacingM*0.30 &&
-    firstRadius > maximumRingRadiusM
-  ) {
-    const rr = maximumRingRadiusM;
-    const circumference = 2*Math.PI*rr;
-    const n = Math.max(
-      3,
-      Math.round(circumference/targetSpacingM)
-    );
-
-    for (let i=0; i<n; i++) {
-      const a = i*2*Math.PI/n;
+    for (let i = 0; i < n; i++) {
+      const a = phase + i * 2 * Math.PI / n;
       placements.push({
-        x:(cx+Math.cos(a)*rr)*FEET_PER_METER,
-        y:(cy+Math.sin(a)*rr)*FEET_PER_METER
+        x: (cx + Math.cos(a) * radiusM) * FEET_PER_METER,
+        y: (cy + Math.sin(a) * radiusM) * FEET_PER_METER
       });
     }
-
-    return placements;
-  }
-
-  let ringIndex = 0;
-
-  for (
-    let rr=firstRadius;
-    rr <= maximumRingRadiusM+1e-6;
-    rr += targetSpacingM
-  ) {
-    const circumference = 2*Math.PI*rr;
-    const n = Math.max(
-      3,
-      Math.round(circumference/targetSpacingM)
-    );
-
-    // Každý druhý prstenec pootočíme o polovinu úhlové rozteče.
-    const phase = (ringIndex%2) ? Math.PI/n : 0;
-
-    for (let i=0; i<n; i++) {
-      const a = phase+i*2*Math.PI/n;
-      placements.push({
-        x:(cx+Math.cos(a)*rr)*FEET_PER_METER,
-        y:(cy+Math.sin(a)*rr)*FEET_PER_METER
-      });
-    }
-
-    ringIndex++;
   }
 
   return placements;
 }
+
+function circleGeometryContribution(horizontalDistanceM, verticalDistanceM, coverageAngleDeg) {
+  const horizontalFt = horizontalDistanceM * FEET_PER_METER;
+  const verticalFt = verticalDistanceM * FEET_PER_METER;
+  const attenuationDb = calculateOffAxisAttenuationDb(
+    horizontalFt,
+    verticalFt,
+    coverageAngleDeg
+  );
+  const directivityLinear = Math.pow(10, attenuationDb / 10);
+  const distanceSqM = Math.max(
+    0.0001,
+    horizontalDistanceM * horizontalDistanceM +
+      verticalDistanceM * verticalDistanceM
+  );
+  return directivityLinear / distanceSqM;
+}
+
+function buildSscCircleGeometryReference(coverage, speaker) {
+  const spacingXM = Math.max(0.05, coverage.spacingX / FEET_PER_METER);
+  const spacingYM = Math.max(0.05, coverage.spacingY / FEET_PER_METER);
+  const verticalDistanceM = Math.max(
+    0.05,
+    coverage.listenerDistance / FEET_PER_METER
+  );
+  const cornerHorizontalM = Math.hypot(spacingXM / 2, spacingYM / 2);
+  const singleCornerContribution = circleGeometryContribution(
+    cornerHorizontalM,
+    verticalDistanceM,
+    speaker?.coverageAngle || 180
+  );
+
+  return {
+    spacingXM,
+    spacingYM,
+    verticalDistanceM,
+    edgeDepthM: Math.max(0.05, Math.min(spacingXM, spacingYM) / 2),
+    boundaryScore: singleCornerContribution,
+    interiorScore: singleCornerContribution * 4
+  };
+}
+
+function circleTopContributionsAtPoint(xM, yM, placementsM, reference, speaker, topN = 4) {
+  const values = [];
+  for (const p of placementsM) {
+    const horizontalM = Math.hypot(xM - p.xM, yM - p.yM);
+    values.push(circleGeometryContribution(
+      horizontalM,
+      reference.verticalDistanceM,
+      speaker?.coverageAngle || 180
+    ));
+  }
+  values.sort((a,b) => b-a);
+  return values.slice(0, topN);
+}
+
+function evaluateCircleAgainstSscReference(
+  room,
+  placements,
+  coverage,
+  speaker,
+  sampleQuality = "full"
+) {
+  if (!placements?.length || room.shape !== "circle") {
+    return {
+      passes:false,
+      boundaryRatio:0,
+      interiorRatio:0,
+      transitionRatio:0,
+      overallRatio:0
+    };
+  }
+
+  const reference = buildSscCircleGeometryReference(coverage, speaker);
+  const R = room.diameterM / 2;
+  const cx = R;
+  const cy = R;
+  const placementsM = placements.map(p => ({
+    xM: p.x / FEET_PER_METER,
+    yM: p.y / FEET_PER_METER
+  }));
+
+  const boundarySamples = sampleQuality === "fast" ? 360 : 1080;
+  let minBoundaryRatio = Infinity;
+
+  // Okraj: srovnáváme s nejhorším rohem SSC, kde uvažujeme jeden
+  // nejbližší reproduktor v diagonální vzdálenosti půl buňky X/Y.
+  for (let i = 0; i < boundarySamples; i++) {
+    const a = (i + 0.5) * 2 * Math.PI / boundarySamples;
+    const xM = cx + Math.cos(a) * R;
+    const yM = cy + Math.sin(a) * R;
+    const nearest = circleTopContributionsAtPoint(
+      xM,yM,placementsM,reference,speaker,1
+    )[0] || 0;
+    minBoundaryRatio = Math.min(
+      minBoundaryRatio,
+      nearest / Math.max(1e-12, reference.boundaryScore)
+    );
+  }
+
+  const radialSamples = sampleQuality === "fast" ? 16 : 28;
+  let minInteriorRatio = Infinity;
+  let minTransitionRatio = Infinity;
+
+  // Plocha: uvnitř porovnáváme čtyři nejsilnější geometrické příspěvky
+  // se středem referenční SSC buňky (4 repro). V pásmu u stěny plynule
+  // přecházíme od okrajové reference k vnitřní, aby nezůstala nekontrolovaná
+  // mezera mezi obvodem a čistým interiérem.
+  for (let ir = 0; ir < radialSamples; ir++) {
+    const rf = Math.sqrt((ir + 0.5) / radialSamples);
+    const r = R * rf;
+    const angleSamples = Math.max(
+      24,
+      Math.round((sampleQuality === "fast" ? 42 : 72) * Math.max(0.25, rf))
+    );
+
+    for (let ia = 0; ia < angleSamples; ia++) {
+      const a = (ia + 0.5) * 2 * Math.PI / angleSamples;
+      const xM = cx + Math.cos(a) * r;
+      const yM = cy + Math.sin(a) * r;
+      const wallDistanceM = Math.max(0, R - r);
+      const contributions = circleTopContributionsAtPoint(
+        xM,yM,placementsM,reference,speaker,4
+      );
+      const top4 = contributions.reduce((sum,v) => sum + v, 0);
+
+      const t = Math.max(
+        0,
+        Math.min(1, wallDistanceM / reference.edgeDepthM)
+      );
+      const requiredScore =
+        reference.boundaryScore +
+        (reference.interiorScore - reference.boundaryScore) * t;
+      const transitionRatio = top4 / Math.max(1e-12, requiredScore);
+      minTransitionRatio = Math.min(minTransitionRatio, transitionRatio);
+
+      if (wallDistanceM >= reference.edgeDepthM - 1e-9) {
+        const interiorRatio = top4 / Math.max(1e-12, reference.interiorScore);
+        minInteriorRatio = Math.min(minInteriorRatio, interiorRatio);
+      }
+    }
+  }
+
+  if (!Number.isFinite(minInteriorRatio)) minInteriorRatio = minTransitionRatio;
+  if (!Number.isFinite(minBoundaryRatio)) minBoundaryRatio = 0;
+  if (!Number.isFinite(minTransitionRatio)) minTransitionRatio = 0;
+
+  const overallRatio = Math.min(
+    minBoundaryRatio,
+    minInteriorRatio,
+    minTransitionRatio
+  );
+
+  // Pouze numerická tolerance vzorkování. Návrhově požadujeme 100 % SSC reference.
+  const passThreshold = 0.995;
+
+  return {
+    passes: overallRatio >= passThreshold,
+    boundaryRatio:minBoundaryRatio,
+    interiorRatio:minInteriorRatio,
+    transitionRatio:minTransitionRatio,
+    overallRatio,
+    reference
+  };
+}
+
+function optimizeCircleRingSpecAgainstSsc(room, spec, coverage, speaker) {
+  let currentSpec = {
+    centerSpeaker:Boolean(spec.centerSpeaker),
+    radiiM:spec.radiiM.slice(),
+    counts:spec.counts.slice()
+  };
+  let currentPlacements = materializeCircleRingSpec(room, currentSpec);
+  let currentBenchmark = evaluateCircleAgainstSscReference(
+    room,currentPlacements,coverage,speaker,"full"
+  );
+
+  if (!currentBenchmark.passes) return null;
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const proposals = [];
+
+    if (currentSpec.centerSpeaker) {
+      proposals.push({
+        centerSpeaker:false,
+        radiiM:currentSpec.radiiM.slice(),
+        counts:currentSpec.counts.slice()
+      });
+    }
+
+    for (let i = 0; i < currentSpec.counts.length; i++) {
+      if (currentSpec.counts[i] <= 3) continue;
+      const next = {
+        centerSpeaker:currentSpec.centerSpeaker,
+        radiiM:currentSpec.radiiM.slice(),
+        counts:currentSpec.counts.slice()
+      };
+      next.counts[i] -= 1;
+      proposals.push(next);
+    }
+
+    // Zkusíme i odebrat celý vnitřní prstenec. Pokud geometrie stále projde,
+    // může to u některých rozměrů ušetřit několik kusů bez zhoršení vůči SSC.
+    if (currentSpec.radiiM.length > 1) {
+      proposals.push({
+        centerSpeaker:currentSpec.centerSpeaker,
+        radiiM:currentSpec.radiiM.slice(1),
+        counts:currentSpec.counts.slice(1)
+      });
+    }
+
+    let best = null;
+    for (const proposal of proposals) {
+      const placements = materializeCircleRingSpec(room, proposal);
+      const benchmark = evaluateCircleAgainstSscReference(
+        room,placements,coverage,speaker,"full"
+      );
+      if (!benchmark.passes) continue;
+
+      const option = {
+        spec:proposal,
+        placements,
+        benchmark,
+        count:placements.length
+      };
+
+      if (
+        !best ||
+        option.count < best.count ||
+        (
+          option.count === best.count &&
+          option.benchmark.overallRatio > best.benchmark.overallRatio
+        )
+      ) best = option;
+    }
+
+    if (best && best.count < currentPlacements.length) {
+      currentSpec = best.spec;
+      currentPlacements = best.placements;
+      currentBenchmark = best.benchmark;
+      changed = true;
+    }
+  }
+
+  return {
+    spec:currentSpec,
+    placements:currentPlacements,
+    benchmark:currentBenchmark
+  };
+}
+
+function generateCircleRingFamily(room, targetSpacingM, centerSpeaker) {
+  const spec = buildCircleRingSpec(room, targetSpacingM, centerSpeaker);
+  return materializeCircleRingSpec(room, spec);
+}
+
 function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
   const R = room.diameterM/2;
   const cx = R;
@@ -2999,52 +3238,44 @@ function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
   return placements;
 }
 
-function buildCircleCoverageDesignCandidates(room, coverage) {
-  // v0.130: geometry follows the original SSC grid spacing exactly.
-  // SSC first calculates targetSpacing and then fits the grid into the room,
-  // so the real spacing can be slightly smaller. This fitted spacing is the
-  // value we preserve for all derived circle layouts.
+function buildCircleCoverageDesignCandidates(room, coverage, speaker) {
+  // v0.133: SSC fitted spacing is the reference geometry. Circular layouts may
+  // use fewer speakers only if every sampled point remains at least as good
+  // as the corresponding SSC interior/edge reference.
   const targetSpacingM = Math.max(
     0.15,
-    Math.min(coverage.spacingX, coverage.spacingY)/FEET_PER_METER
+    Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
   );
 
-  const candidates = [
-    {
-      method:"Kruhové prstence se středovým repro",
-      family:"rings-center",
-      placements:generateCircleRingFamily(
-        room,targetSpacingM,true
-      )
-    },
-    {
-      method:"Kruhové prstence bez středového repro",
-      family:"rings-no-center",
-      placements:generateCircleRingFamily(
-        room,targetSpacingM,false
-      )
-    },
-    {
-      method:"Řady 0° v kruhu",
-      family:"rows-0",
-      placements:generateCircleRowFamily(
-        room,targetSpacingM,0
-      )
-    }
-  ];
+  const candidates = [];
 
-  return candidates
-    .filter(c=>c.placements?.length)
-    .map(c=>({
-      ...c,
-      count:c.placements.length,
+  for (const centerSpeaker of [true,false]) {
+    const baseSpec = buildCircleRingSpec(room, targetSpacingM, centerSpeaker);
+    const optimized = optimizeCircleRingSpecAgainstSsc(
+      room,baseSpec,coverage,speaker
+    );
+    if (!optimized?.placements?.length) continue;
+
+    const benchmark = optimized.benchmark;
+    candidates.push({
+      method:centerSpeaker
+        ? "Kruhové prstence • SSC benchmark"
+        : "Kruhové prstence bez středu • SSC benchmark",
+      family:centerSpeaker ? "rings-center" : "rings-no-center",
+      placements:optimized.placements,
+      ringSpec:optimized.spec,
+      count:optimized.placements.length,
+      sscBenchmark:benchmark,
       designCoveragePct:circleDesignCoveragePct(
-        room,c.placements,coverage
+        room,optimized.placements,coverage
       ),
       geometryScore:circlePlacementGeometryScore(
-        room,c.placements,targetSpacingM
+        room,optimized.placements,targetSpacingM
       )
-    }));
+    });
+  }
+
+  return candidates;
 }
 
 
@@ -3405,65 +3636,411 @@ function pruneCircleAlignedCandidate(
   };
 }
 
-function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
-  // v0.130 – SSC geometry is the primary rule.
-  // We never stretch spacing to reduce speaker count.  For aligned placement
-  // we use the exact grid produced by calculateCoverage()/calculatePlacements:
-  // same X/Y spacing and half-cell offsets as the original Sonance SSC, then
-  // simply omit grid points that fall outside the circular room.
-  if (circleMode === "circle-aligned") {
-    const placements = calculatePlacements(coverage, room);
-    if (!placements.length) return null;
+function buildCircleAlignedCoverageForGrid(room, coverage, columns, rows) {
+  const widthFt = room.widthM * FEET_PER_METER;
+  const lengthFt = room.lengthM * FEET_PER_METER;
+  const spacingX = Math.min(
+    coverage.targetSpacing,
+    Math.round((widthFt / columns) * 100) / 100
+  );
+  const spacingY = Math.min(
+    coverage.targetSpacing,
+    Math.round((lengthFt / rows) * 100) / 100
+  );
 
-    const spacingM = Math.max(
-      0.15,
-      Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
+  return {
+    ...coverage,
+    columns,
+    rows,
+    count:columns*rows,
+    spacingX,
+    spacingY,
+    offsetX:columns === 1 ? widthFt/2 : spacingX/2,
+    offsetY:rows === 1 ? lengthFt/2 : spacingY/2
+  };
+}
+
+
+function generateCircleStaggeredGrid(room, spacingM, angleDeg = 0, phaseX = 0, phaseY = 0) {
+  const R = room.diameterM / 2;
+  const cx = R;
+  const cy = R;
+  const rowPitch = spacingM * Math.sqrt(3) / 2;
+  const a = angleDeg * Math.PI / 180;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const points = [];
+  const nY = Math.ceil((2 * R) / Math.max(0.05, rowPitch)) + 3;
+  const nX = Math.ceil((2 * R) / Math.max(0.05, spacingM)) + 3;
+
+  for (let iy = -nY; iy <= nY; iy++) {
+    const uy = (iy + phaseY) * rowPitch;
+    const rowOffset = ((iy & 1) ? 0.5 : 0) + phaseX;
+    for (let ix = -nX; ix <= nX; ix++) {
+      const ux = (ix + rowOffset) * spacingM;
+      const rx = ux * ca - uy * sa;
+      const ry = ux * sa + uy * ca;
+      if (Math.hypot(rx, ry) <= R + 1e-6) {
+        points.push({
+          x: (cx + rx) * FEET_PER_METER,
+          y: (cy + ry) * FEET_PER_METER
+        });
+      }
+    }
+  }
+  return points;
+}
+
+function generateCenteredHexCluster(room, spacingM, shellCount, rotationDeg = 0) {
+  const R = room.diameterM / 2;
+  const cx = R;
+  const cy = R;
+  const a = rotationDeg * Math.PI / 180;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const pts = [];
+
+  // Triangular/hexagonal lattice, naturally centered on one loudspeaker.
+  for (let q = -shellCount; q <= shellCount; q++) {
+    const rMin = Math.max(-shellCount, -q - shellCount);
+    const rMax = Math.min(shellCount, -q + shellCount);
+    for (let r = rMin; r <= rMax; r++) {
+      const ux = spacingM * (q + r / 2);
+      const uy = spacingM * (Math.sqrt(3) / 2) * r;
+      const rx = ux * ca - uy * sa;
+      const ry = ux * sa + uy * ca;
+      if (Math.hypot(rx, ry) <= R + 1e-6) {
+        pts.push({
+          x: (cx + rx) * FEET_PER_METER,
+          y: (cy + ry) * FEET_PER_METER
+        });
+      }
+    }
+  }
+  return pts;
+}
+
+function circleCandidateFromPlacements(room, coverage, speaker, placements, family, method, spacingM) {
+  if (!placements?.length) return null;
+  const benchmark = evaluateCircleAgainstSscReference(room, placements, coverage, speaker, "full");
+  if (!benchmark.passes) return null;
+  return {
+    placements,
+    count: placements.length,
+    method,
+    family,
+    designCoveragePct: circleDesignCoveragePct(room, placements, coverage),
+    requiredDesignCoveragePct: null,
+    geometryScore: circlePlacementGeometryScore(room, placements, spacingM),
+    clearanceM: recommendedWallClearanceMeters(coverage, room),
+    isStructuredLattice: true,
+    score: 0,
+    source: "ssc-geometry-benchmark",
+    radialScale: 1,
+    removedSymmetricCount: 0,
+    sscBenchmark: benchmark
+  };
+}
+
+function buildAlignedCircleCandidates(room, coverage, speaker) {
+  const candidates = [];
+  const spacingM = Math.max(0.15, Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER);
+
+  // 1) Pure orthogonal SSC grid. Density is increased only within this family.
+  for (let extra = 0; extra <= 6; extra++) {
+    const candidateCoverage = buildCircleAlignedCoverageForGrid(
+      room, coverage, coverage.columns + extra, coverage.rows + extra
     );
-
-    return {
-      placements,
-      count: placements.length,
-      method: `Pevná SSC mřížka ${coverage.columns} × ${coverage.rows} oříznutá kruhem`,
-      family: "ssc-grid-circle",
-      designCoveragePct: circleDesignCoveragePct(room, placements, coverage),
-      requiredDesignCoveragePct: null,
-      geometryScore: circlePlacementGeometryScore(room, placements, spacingM),
-      clearanceM: recommendedWallClearanceMeters(coverage, room),
-      isStructuredLattice: true,
-      score: 0,
-      source: "ssc-fixed-spacing",
-      radialScale: 1,
-      removedSymmetricCount: 0
-    };
+    const placements = calculatePlacements(candidateCoverage, room);
+    const c = circleCandidateFromPlacements(
+      room, coverage, speaker, placements, "aligned-square",
+      extra === 0
+        ? `Pevná SSC mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem`
+        : `Pevná mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem • zahuštěno pro SSC okraj`,
+      Math.min(candidateCoverage.spacingX, candidateCoverage.spacingY) / FEET_PER_METER
+    );
+    if (c) {
+      c.circleGridCoverage = candidateCoverage;
+      candidates.push(c);
+      break;
+    }
   }
 
-  // Circular/ring layout keeps the SAME fitted SSC spacing as the aligned
-  // grid. We choose the smaller valid ring family, but do not acoustically
-  // expand/contract the rings afterwards.
-  const candidates = buildCircleCoverageDesignCandidates(room, coverage)
-    .filter(c => ["rings-center", "rings-no-center"].includes(c.family));
+  // 2) Staggered/hex grid remains an aligned lattice family, but is optimized independently.
+  const angles = [0, 30, 60, 90];
+  const phases = [[0,0], [0.5,0], [0,0.5]];
+  for (let density = 0; density <= 5; density++) {
+    const s = spacingM * (1 - density * 0.055);
+    let foundAtDensity = false;
+    for (const angle of angles) {
+      for (const [px,py] of phases) {
+        const placements = generateCircleStaggeredGrid(room, s, angle, px, py);
+        const c = circleCandidateFromPlacements(
+          room, coverage, speaker, placements, "aligned-hex",
+          `Posunutá hex mřížka • ${angle}° • SSC benchmark`, s
+        );
+        if (c) {
+          candidates.push(c);
+          foundAtDensity = true;
+        }
+      }
+    }
+    if (foundAtDensity) break;
+  }
+  return candidates;
+}
+
+function generateRegularCirclePattern(room, ringCount, radiusM, centerSpeaker = false, phaseRad = 0) {
+  const R = room.diameterM / 2;
+  const cx = R;
+  const cy = R;
+  const pts = [];
+
+  if (centerSpeaker) {
+    pts.push({x: cx * FEET_PER_METER, y: cy * FEET_PER_METER});
+  }
+
+  if (ringCount <= 0) return pts;
+
+  // Pro N=2 dovolujeme dvojici přes střed; pro N>=3 jde o pravidelný polygon.
+  for (let i = 0; i < ringCount; i++) {
+    const a = phaseRad + i * 2 * Math.PI / ringCount;
+    pts.push({
+      x: (cx + Math.cos(a) * radiusM) * FEET_PER_METER,
+      y: (cy + Math.sin(a) * radiusM) * FEET_PER_METER
+    });
+  }
+  return pts;
+}
+
+function bestRegularCirclePattern(room, coverage, speaker, ringCount, centerSpeaker = false) {
+  const R = room.diameterM / 2;
+  const spacingM = Math.max(0.15, Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER);
+
+  if (ringCount === 0 && centerSpeaker) {
+    const placements = generateRegularCirclePattern(room, 0, 0, true, 0);
+    return circleCandidateFromPlacements(
+      room, coverage, speaker, placements, "circular-center",
+      "1 repro ve středu • SSC benchmark", spacingM
+    );
+  }
+
+  // Poloměr není odhadnutý z počtu kusů. Pro každé N ho samostatně hledáme,
+  // aby nejmenší konfigurace měla nejlepší možnou šanci splnit SSC referenci.
+  const phases = ringCount <= 2 ? [0, Math.PI / 2] : [0, Math.PI / ringCount];
+  const coarseSteps = 120;
+  let best = null;
+
+  const consider = (radiusM, phaseRad) => {
+    if (!(radiusM >= 0) || radiusM > R + 1e-9) return;
+    const placements = generateRegularCirclePattern(
+      room, ringCount, radiusM, centerSpeaker, phaseRad
+    );
+    const benchmark = evaluateCircleAgainstSscReference(
+      room, placements, coverage, speaker, "full"
+    );
+    const option = {
+      placements,
+      benchmark,
+      radiusM,
+      phaseRad,
+      count: placements.length
+    };
+    if (
+      !best ||
+      option.benchmark.overallRatio > best.benchmark.overallRatio ||
+      (
+        Math.abs(option.benchmark.overallRatio - best.benchmark.overallRatio) < 1e-9 &&
+        option.radiusM < best.radiusM
+      )
+    ) best = option;
+  };
+
+  for (const phase of phases) {
+    for (let i = 1; i <= coarseSteps; i++) {
+      const r = R * i / (coarseSteps + 1);
+      consider(r, phase);
+    }
+  }
+
+  if (!best) return null;
+
+  // Jemné doladění kolem nejlepšího hrubého poloměru.
+  const coarsePitch = R / (coarseSteps + 1);
+  for (let k = -20; k <= 20; k++) {
+    const r = best.radiusM + k * coarsePitch / 20;
+    consider(r, best.phaseRad);
+  }
+
+  if (!best.benchmark.passes) return null;
+
+  const label = centerSpeaker
+    ? `1 střed + ${ringCount} na kruhu`
+    : `${ringCount} repro na kruhu`;
+
+  return {
+    placements: best.placements,
+    count: best.placements.length,
+    method: `${label} • optimalizovaný poloměr ${best.radiusM.toFixed(2)} m • SSC benchmark`,
+    family: centerSpeaker ? "circular-center-ring" : "circular-single-ring",
+    ringRadiusM: best.radiusM,
+    designCoveragePct: circleDesignCoveragePct(room, best.placements, coverage),
+    requiredDesignCoveragePct: null,
+    geometryScore: circlePlacementGeometryScore(room, best.placements, spacingM),
+    clearanceM: recommendedWallClearanceMeters(coverage, room),
+    isStructuredLattice: true,
+    score: 0,
+    source: "ssc-geometry-benchmark",
+    radialScale: 1,
+    removedSymmetricCount: 0,
+    sscBenchmark: best.benchmark
+  };
+}
+
+function bestCenteredHexShell(room, coverage, speaker, shellCount) {
+  const R = room.diameterM / 2;
+  const referenceSpacingM = Math.max(
+    0.15,
+    Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
+  );
+  const rotations = [0, 30];
+  let best = null;
+
+  // Kompletní plástvová vrstva: 1, 7, 19, 37... bodů.
+  // Pitch hledáme od kompaktní po referenční SSC rozteč; nepřekračujeme SSC spacing.
+  for (let step = 0; step <= 48; step++) {
+    const factor = 0.45 + (0.55 * step / 48);
+    const pitchM = referenceSpacingM * factor;
+    for (const rotation of rotations) {
+      const placements = generateCenteredHexCluster(room, pitchM, shellCount, rotation);
+      const expectedCount = 1 + 3 * shellCount * (shellCount + 1);
+      // Chceme skutečně kompletní hex/plástev, nikoli kruhem oříznutou mřížku.
+      if (placements.length !== expectedCount) continue;
+
+      const benchmark = evaluateCircleAgainstSscReference(
+        room, placements, coverage, speaker, "full"
+      );
+      const option = {placements, benchmark, pitchM, rotation, count:placements.length};
+      if (
+        !best ||
+        option.benchmark.overallRatio > best.benchmark.overallRatio ||
+        (
+          Math.abs(option.benchmark.overallRatio - best.benchmark.overallRatio) < 1e-9 &&
+          option.pitchM > best.pitchM
+        )
+      ) best = option;
+    }
+  }
+
+  if (!best?.benchmark?.passes) return null;
+
+  return {
+    placements: best.placements,
+    count: best.count,
+    method: `Plástvová hex struktura • ${best.count} ks • rozteč ${best.pitchM.toFixed(2)} m • SSC benchmark`,
+    family: "circular-honeycomb",
+    hexShellCount: shellCount,
+    designCoveragePct: circleDesignCoveragePct(room, best.placements, coverage),
+    requiredDesignCoveragePct: null,
+    geometryScore: circlePlacementGeometryScore(room, best.placements, referenceSpacingM),
+    clearanceM: recommendedWallClearanceMeters(coverage, room),
+    isStructuredLattice: true,
+    score: 0,
+    source: "ssc-geometry-benchmark",
+    radialScale: 1,
+    removedSymmetricCount: 0,
+    sscBenchmark: best.benchmark
+  };
+}
+
+function buildCircularOnlyCandidates(room, coverage, speaker) {
+  const candidates = [];
+
+  // v0.134: kruhový režim postupuje deterministicky od nejmenšího vzoru.
+  // Každý počet je posuzován samostatně proti SSC referenci; počet se nepřebírá
+  // ze zarovnané varianty a poloměr kruhu se pro každé N optimalizuje zvlášť.
+
+  // 1) Jediný reproduktor ve středu.
+  const centerOnly = bestRegularCirclePattern(room, coverage, speaker, 0, true);
+  if (centerOnly) return [centerOnly];
+
+  // 2) Až 6 reproduktorů na jednom pravidelném kruhu bez středu.
+  for (let n = 2; n <= 6; n++) {
+    const c = bestRegularCirclePattern(room, coverage, speaker, n, false);
+    if (c) return [c];
+  }
+
+  // 3) První plástvový vzor: 1 střed + 6 okolo. Poloměr/rozteč se opět hledá.
+  const centerPlusSix = bestRegularCirclePattern(room, coverage, speaker, 6, true);
+  if (centerPlusSix) {
+    centerPlusSix.method = centerPlusSix.method.replace(
+      "1 střed + 6 na kruhu",
+      "Plástvový vzor 1 + 6"
+    );
+    centerPlusSix.family = "circular-honeycomb-7";
+    return [centerPlusSix];
+  }
+
+  // 4) Než přidáme druhý prstenec, zkoušíme 1 střed + 7 až 12 na jednom kruhu.
+  // Pro každý počet se poloměr optimalizuje samostatně a první konfigurace,
+  // která splní SSC benchmark, se použije.
+  //
+  // Geometrická stop-podmínka: pokud by i při prstenci až u obvodu místnosti
+  // byla vzdálenost sousedů menší než 60 % SSC rozteče, další zahušťování
+  // jednoho prstence už nedává smysl a přecházíme na více vrstev.
+  const R = room.diameterM / 2;
+  const referenceSpacingM = Math.max(
+    0.15,
+    Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
+  );
+  const minUsefulNeighborSpacingM = 0.60 * referenceSpacingM;
+
+  for (let n = 7; n <= 12; n++) {
+    const maxNeighborSpacingM = 2 * R * Math.sin(Math.PI / n);
+    if (maxNeighborSpacingM < minUsefulNeighborSpacingM) break;
+
+    const c = bestRegularCirclePattern(room, coverage, speaker, n, true);
+    if (c) {
+      c.method = c.method.replace(
+        `1 střed + ${n} na kruhu`,
+        `1 + ${n} • střed + jeden prstenec`
+      );
+      c.family = "circular-center-single-ring";
+      return [c];
+    }
+  }
+
+  // 5) Pokud nestačí ani rozumně hustý jeden prstenec, pokračujeme vícevrstvou
+  // centrovanou hexagonální/plástvovou strukturou: 19, 37, 61... kusů.
+  // Limit 18 vrstev je záměrně vysoký, aby běžná změna repro/overlapu nekončila chybou.
+  for (let shell = 2; shell <= 18; shell++) {
+    const c = bestCenteredHexShell(room, coverage, speaker, shell);
+    if (c) return [c];
+  }
+
+  return candidates;
+}
+
+function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
+  const speaker = acousticContext?.speaker || null;
+
+  // v0.133: aligned and circular modes are two independent optimizers.
+  // No shared loudspeaker count and no fallback from one mode to the other.
+  const candidates = circleMode === "circle-aligned"
+    ? buildAlignedCircleCandidates(room, coverage, speaker)
+    : buildCircularOnlyCandidates(room, coverage, speaker);
 
   if (!candidates.length) return null;
 
-  // Prefer the smallest count. Coverage percentage is only a tie-breaker;
-  // SPL remains a separate verification layer, not a license to enlarge gaps.
+  // Each mode finds its own minimum safe count. Quality metrics only break ties.
   candidates.sort((a,b) =>
     a.count - b.count ||
+    b.sscBenchmark.overallRatio - a.sscBenchmark.overallRatio ||
     b.designCoveragePct - a.designCoveragePct ||
     a.geometryScore - b.geometryScore
   );
 
-  const chosen = candidates[0];
-  return {
-    ...chosen,
-    requiredDesignCoveragePct: null,
-    clearanceM: recommendedWallClearanceMeters(coverage, room),
-    isStructuredLattice: true,
-    score: 0,
-    source: "ssc-fixed-spacing",
-    radialScale: 1,
-    removedSymmetricCount: 0
-  };
+  return candidates[0];
 }
 
 function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
@@ -3928,6 +4505,37 @@ function recommendSpeakerCountAndLayout(args) {
   cacheSetLimited(COUNT_RECOMMENDATION_CACHE, cacheKey, result, 48);
   return result;
 }
+function loneliestSpeakerNearestDistance(placements) {
+  if (!placements?.length || placements.length === 1) return null;
+
+  let loneliest = null;
+  for (let i = 0; i < placements.length; i++) {
+    let nearestM = Infinity;
+    let nearestIndex = -1;
+    for (let j = 0; j < placements.length; j++) {
+      if (i === j) continue;
+      const distanceM = Math.hypot(
+        (placements[i].x - placements[j].x) / FEET_PER_METER,
+        (placements[i].y - placements[j].y) / FEET_PER_METER
+      );
+      if (distanceM < nearestM) {
+        nearestM = distanceM;
+        nearestIndex = j;
+      }
+    }
+
+    if (Number.isFinite(nearestM) && (!loneliest || nearestM > loneliest.distanceM)) {
+      loneliest = {
+        speakerIndex: i,
+        nearestIndex,
+        distanceM: nearestM
+      };
+    }
+  }
+
+  return loneliest;
+}
+
 function nearestNeighbourSpacingMeters(placements) {
   if (!placements?.length || placements.length === 1) return null;
   const values = [];
@@ -4053,34 +4661,36 @@ function calculateOffAxisAttenuationDb(horizontalDistanceFt, verticalDistanceFt,
   return Math.max(-30, Math.min(0, attenuation));
 }
 
-function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap}) {
-  let totalIntensity = 0;
+function createSplKernel({listenerHeightFt, placements, mountingHeightFt, speaker, tap}) {
+  const dz = mountingHeightFt - listenerHeightFt;
+  const dz2 = dz * dz;
+  const minDistance2 = MIN_LISTENER_DISTANCE_FT * MIN_LISTENER_DISTANCE_FT;
+  const referenceDistance2 = SPL_REFERENCE_DISTANCE_FT * SPL_REFERENCE_DISTANCE_FT;
+  // Matematicky shodné s původním SSC-style SPL vztahem, pouze bez opakovaných
+  // sqrt/log/pow operací pro každý reproduktor a každý bod heatmapy.
+  const sourceIntensityAtReference = Math.pow(10, speaker.sensitivity / 10) * Math.max(tap, 1e-12);
+  return {
+    placements,
+    dz2,
+    minDistance2,
+    intensityScale: sourceIntensityAtReference * referenceDistance2
+  };
+}
 
-  for (const p of placements) {
+function calculateSPLWithKernel(xFt, yFt, kernel) {
+  let totalIntensity = 0;
+  for (const p of kernel.placements) {
     const dx = xFt - p.x;
     const dy = yFt - p.y;
-    const dz = mountingHeightFt - listenerHeightFt;
-    const horizontalDistanceFt = Math.sqrt(dx * dx + dy * dy);
-    const distanceFt = Math.max(
-      MIN_LISTENER_DISTANCE_FT,
-      Math.sqrt(horizontalDistanceFt * horizontalDistanceFt + dz * dz)
-    );
-    const offAxisAttenuationDb = calculateOffAxisAttenuationDb(
-      horizontalDistanceFt,
-      dz,
-      speaker.coverageAngle
-    );
-
-    const spl =
-      speaker.sensitivity +
-      10 * Math.log10(tap) -
-      20 * Math.log10(distanceFt / SPL_REFERENCE_DISTANCE_FT) +
-      offAxisAttenuationDb;
-
-    totalIntensity += Math.pow(10, spl / 10);
+    const distance2 = Math.max(kernel.minDistance2, dx * dx + dy * dy + kernel.dz2);
+    totalIntensity += kernel.intensityScale / distance2;
   }
-
   return 10 * Math.log10(Math.max(totalIntensity, 1e-12));
+}
+
+function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHeightFt, speaker, tap}) {
+  const kernel = createSplKernel({listenerHeightFt, placements, mountingHeightFt, speaker, tap});
+  return calculateSPLWithKernel(xFt, yFt, kernel);
 }
 
 
@@ -4121,6 +4731,23 @@ function calculateSPLStatsLikeSSC({
   };
 }
 
+let heatmapCache = { key: null, value: null };
+
+function makeHeatmapCacheKey({lengthFt, widthFt, placements, mountingHeightFt, listenerHeightFt, speaker, tap, room}) {
+  // Klíč obsahuje pouze veličiny, které skutečně mění SPL pole.
+  // Změna zesilovače, Dante nebo polohy posluchače tak heatmapu zbytečně nepřepočítá.
+  return JSON.stringify({
+    lengthFt: Number(lengthFt.toFixed(5)),
+    widthFt: Number(widthFt.toFixed(5)),
+    mountingHeightFt: Number(mountingHeightFt.toFixed(5)),
+    listenerHeightFt: Number(listenerHeightFt.toFixed(5)),
+    sensitivity: Number(speaker?.sensitivity || 0),
+    tap: Number(tap),
+    room,
+    placements: placements.map(p => [Number(p.x.toFixed(5)), Number(p.y.toFixed(5))])
+  });
+}
+
 function calculateHeatmap({
   lengthFt,
   widthFt,
@@ -4131,6 +4758,14 @@ function calculateHeatmap({
   tap,
   room
 }) {
+  const cacheKey = makeHeatmapCacheKey({
+    lengthFt, widthFt, placements, mountingHeightFt, listenerHeightFt, speaker, tap, room
+  });
+  if (heatmapCache.key === cacheKey && heatmapCache.value) {
+    return heatmapCache.value;
+  }
+
+  const splKernel = createSplKernel({listenerHeightFt, placements, mountingHeightFt, speaker, tap});
   const lengthM = lengthFt / FEET_PER_METER;
   const widthM = widthFt / FEET_PER_METER;
   const areaM2 = room?.areaM2 || (lengthM * widthM);
@@ -4171,15 +4806,7 @@ function calculateHeatmap({
         continue;
       }
 
-      const spl = calculateSPLAtPoint({
-        xFt,
-        yFt,
-        listenerHeightFt,
-        placements,
-        mountingHeightFt,
-        speaker,
-        tap
-      });
+      const spl = calculateSPLWithKernel(xFt, yFt, splKernel);
 
       cells.push({ ix, iy, spl });
       min = Math.min(min, spl);
@@ -4191,7 +4818,7 @@ function calculateHeatmap({
   const average = cells.length ? 10 * Math.log10(sumLinear / cells.length) : 0;
   if (!cells.length) { min = 0; max = 0; }
 
-  return {
+  const result = {
     nx,
     ny,
     cells,
@@ -4204,6 +4831,8 @@ function calculateHeatmap({
     points: cells.length,
     areaM2
   };
+  heatmapCache = { key: cacheKey, value: result };
+  return result;
 }
 
 function calculateVisualHeatmap({
@@ -4353,6 +4982,32 @@ let appState = {
 };
 
 
+function floorSpeakerInfluence(placements, listenerXFt, listenerYFt) {
+  const latest = appState.latest;
+  if (!latest || !placements?.length) return placements.map(() => ({ influence: "low" }));
+
+  // Vizuální vliv je čistě geometrický a odpovídá kuželům v řezech:
+  // strong = půdorysná poloha posluchače leží uvnitř nominálního kuželu v rovině uší
+  // medium = není už v kuželu v rovině uší, ale stále leží v půdorysu kuželu až k podlaze
+  // low = ani kužel promítnutý k podlaze na tuto půdorysnou polohu nedosáhne
+  const mountingHeightFt = Math.max(0.01, Number(latest.mountingHeightFt) || 0.01);
+  const listenerHeightFt = Math.max(0, Number(latest.listenerHeightFt) || 0);
+  const verticalToEarFt = Math.max(0.01, mountingHeightFt - listenerHeightFt);
+  const verticalToFloorFt = mountingHeightFt;
+  const coverageAngle = Number(latest.speaker?.coverageAngle) || 180;
+  const halfAngleRad = Math.max(0.5, Math.min(89.5, coverageAngle / 2)) * Math.PI / 180;
+  const radiusAtEarFt = Math.tan(halfAngleRad) * verticalToEarFt;
+  const radiusAtFloorFt = Math.tan(halfAngleRad) * verticalToFloorFt;
+
+  return placements.map((p) => {
+    const horizontalFt = Math.hypot(listenerXFt - p.x, listenerYFt - p.y);
+    let influence = "low";
+    if (horizontalFt <= radiusAtEarFt + 1e-9) influence = "strong";
+    else if (horizontalFt <= radiusAtFloorFt + 1e-9) influence = "medium";
+    return { horizontalFt, radiusAtEarFt, radiusAtFloorFt, influence };
+  });
+}
+
 function drawFloorPlan({
   lengthM, widthM, lengthFt, widthFt, room,
   placements, coverage, speakerModel, heatmap,
@@ -4372,7 +5027,15 @@ function drawFloorPlan({
 
   const rect = roomSvgShape(room, ox, oy, scale);
   const floorClipId = "floor-room-clip";
-  const floorDefs = `<defs>${roomClipPath(room, ox, oy, scale, floorClipId)}</defs>`;
+  const floorDefs = `<defs>
+    ${roomClipPath(room, ox, oy, scale, floorClipId)}
+    <filter id="speaker-active-glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feFlood flood-color="#ff7a1a" flood-opacity="0.9" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>`;
 
   const dims = `
     <text x="${W/2}" y="${oy + roomH + 34}" text-anchor="middle"
@@ -4394,20 +5057,34 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
     </rect>`;
   }).join("");
 
-  const radius = 10;
+  const iconSize = 28;
+  const influences = floorSpeakerInfluence(placements, listenerXFt, listenerYFt);
   const circles = placements.map((p, idx) => {
     const xM = p.x * ftToM;
     const yM = p.y * ftToM;
     const cx = ox + xM * scale;
     const cy = oy + yM * scale;
+    const influence = influences[idx]?.influence || "low";
+    const strong = influence === "strong";
+    const medium = influence === "medium";
+    const opacity = strong ? 1 : medium ? 0.68 : 0.30;
+    const ringStroke = strong ? "#ff7a1a" : medium ? "rgba(255,122,26,0.62)" : "rgba(170,180,190,0.42)";
+    const ringWidth = strong ? 2.6 : medium ? 1.8 : 1.1;
+    const haloOpacity = strong ? 0.22 : medium ? 0.08 : 0.025;
+    const imageFilter = strong ? 'filter="url(#speaker-active-glow)"' : "";
 
     return `
-      <g>
-        <circle cx="${cx}" cy="${cy}" r="${radius + 6}" fill="rgba(255,122,26,0.12)" stroke="rgba(255,122,26,0.5)" stroke-width="1"/>
-        <circle cx="${cx}" cy="${cy}" r="${radius}" fill="#ff7a1a" stroke="#fff" stroke-width="2"/>
-        <circle cx="${cx}" cy="${cy}" r="3" fill="#fff"/>
-        <text x="${cx}" y="${cy + 24}" text-anchor="middle" fill="#d0d7df" font-size="10">${idx + 1}</text>
-        <text x="${cx}" y="${cy + 38}" text-anchor="middle" fill="#f4f7fb" font-size="10" font-weight="700">
+      <g opacity="${opacity}">
+        <circle cx="${cx}" cy="${cy}" r="${iconSize / 2 + 6}"
+          fill="rgba(255,122,26,${haloOpacity})" stroke="${ringStroke}" stroke-width="${ringWidth}"/>
+        <image href="assets/repro_ikona.png"
+          x="${cx - iconSize / 2}" y="${cy - iconSize / 2}"
+          width="${iconSize}" height="${iconSize}"
+          preserveAspectRatio="xMidYMid meet" ${imageFilter}/>
+        <circle cx="${cx}" cy="${cy}" r="${iconSize / 2}"
+          fill="none" stroke="${ringStroke}" stroke-width="${ringWidth}"/>
+        <text x="${cx}" y="${cy + 27}" text-anchor="middle" fill="#d0d7df" font-size="10">${idx + 1}</text>
+        <text x="${cx}" y="${cy + 41}" text-anchor="middle" fill="#f4f7fb" font-size="10" font-weight="700">
           ${appState.latest?.power?.singleSpeakerSPL?.toFixed(1) ?? "—"} dB
         </text>
       </g>`;
@@ -4515,17 +5192,36 @@ function drawSectionView({
 
   const halfAngleRad = Math.max(1, Math.min(179, speaker.coverageAngle)) * Math.PI / 360;
   const verticalDistanceToEarM = Math.max(0.05, mountHeightM - listenerHeightM);
-  const halfCoverageAtEarM = Math.tan(halfAngleRad) * verticalDistanceToEarM;
-
-  const uniqueAxisPositions = [...new Set(
-    placements.map(p => {
-      const ft = axis === "length" ? p.y : p.x;
-      return Number((ft / FEET_PER_METER).toFixed(4));
-    })
-  )].sort((a,b) => a-b);
+  // Pro nominální kužel v řezu kreslíme vyzařování až k podlaze, stejně jako SSC.
+  // Rovina uší zůstává jen jako referenční linka, nikoli jako ukončení kuželu.
+  const verticalDistanceToFloorM = Math.max(0.05, mountHeightM);
+  const halfCoverageAtFloorM = Math.tan(halfAngleRad) * verticalDistanceToFloorM;
 
   const listenerAxisM = (axis === "length" ? listenerYFt : listenerXFt) / FEET_PER_METER;
+  const listenerCrossM = (axis === "length" ? listenerXFt : listenerYFt) / FEET_PER_METER;
+  const listenerXM = listenerXFt / FEET_PER_METER;
+  const listenerYM = listenerYFt / FEET_PER_METER;
   const listenerSpl = calculateSectionListenerSpl(axis, listenerAxisM);
+
+  // Stejná geometrická klasifikace jako v půdorysu:
+  // strong = posluchač je uvnitř kuželu v rovině uší,
+  // medium = posluchač je mimo kužel v rovině uší, ale jeho půdorysná pozice
+  //          ještě leží uvnitř kuželu promítnutého až k podlaze,
+  // low = mimo oba rozsahy.
+  const radiusAtEarM = Math.tan(halfAngleRad) * verticalDistanceToEarM;
+  const radiusAtFloorM = Math.tan(halfAngleRad) * verticalDistanceToFloorM;
+  const sectionSpeakers = placements.map((p, index) => {
+    const xM = p.x / FEET_PER_METER;
+    const yM = p.y / FEET_PER_METER;
+    const axisM = axis === "length" ? yM : xM;
+    const crossM = axis === "length" ? xM : yM;
+    const horizontalM = Math.hypot(xM - listenerXM, yM - listenerYM);
+    const crossDistanceM = Math.abs(crossM - listenerCrossM);
+    let influence = "low";
+    if (horizontalM <= radiusAtEarM + 1e-9) influence = "strong";
+    else if (horizontalM <= radiusAtFloorM + 1e-9) influence = "medium";
+    return {index, xM, yM, axisM, crossM, horizontalM, crossDistanceM, influence};
+  });
 
   const clipId = `${svgId}-room-clip`;
   const defs = `
@@ -4559,30 +5255,73 @@ function drawSectionView({
     </text>
   `;
 
-  const coneSvg = uniqueAxisPositions.map(posM => {
-    const cx = ox + posM * pxPerMeter;
-    const bottomY = earY;
-    const halfWidthPx = halfCoverageAtEarM * pxPerMeter;
+  const coneSvg = sectionSpeakers.map(item => {
+    const cx = ox + item.axisM * pxPerMeter;
+    const bottomY = floorY;
+    const halfWidthPx = halfCoverageAtFloorM * pxPerMeter;
     const pts = conePolygonPoints(cx, speakerY, bottomY, halfWidthPx);
+    const style = item.influence === "strong"
+      ? {fill:"rgba(255,122,26,0.22)", stroke:"rgba(255,150,70,0.95)", width:1.8}
+      : item.influence === "medium"
+        ? {fill:"rgba(255,122,26,0.075)", stroke:"rgba(255,150,70,0.42)", width:1.1}
+        : {fill:"rgba(155,165,178,0.018)", stroke:"rgba(155,165,178,0.16)", width:0.8};
 
     return `
       <polygon points="${pts}"
-        fill="rgba(255,122,26,0.10)"
-        stroke="rgba(255,150,70,0.65)"
-        stroke-width="1.2"/>
+        fill="${style.fill}"
+        stroke="${style.stroke}"
+        stroke-width="${style.width}"/>
     `;
   }).join("");
 
-  const speakersSvg = uniqueAxisPositions.map(posM => {
-    const cx = ox + posM * pxPerMeter;
+  const speakersSvg = sectionSpeakers.map(item => {
+    const cx = ox + item.axisM * pxPerMeter;
+    const strong = item.influence === "strong";
+    const medium = item.influence === "medium";
+    const fill = strong ? "#ff7a1a" : medium ? "#b96a32" : "#69727e";
+    const stroke = strong ? "#fff0e4" : medium ? "#c99a76" : "#89929e";
+    const opacity = strong ? 1 : medium ? 0.62 : 0.28;
+    const r = strong ? 7 : medium ? 6 : 5;
     return `
-      <g>
+      <g opacity="${opacity}">
         <line x1="${cx}" y1="${ceilingY}" x2="${cx}" y2="${speakerY}"
-          stroke="#5c6672" stroke-width="1"/>
-        <circle cx="${cx}" cy="${speakerY}" r="6"
-          fill="#ff7a1a" stroke="#ffd5b7" stroke-width="1.2"/>
+          stroke="${stroke}" stroke-width="${strong ? 1.4 : 0.9}"/>
+        <circle cx="${cx}" cy="${speakerY}" r="${r}"
+          fill="${fill}" stroke="${stroke}" stroke-width="${strong ? 1.8 : 1}"/>
       </g>
     `;
+  }).join("");
+
+  // Číslování reproduktorů v řezu. Reproduktory, které se v projekci řezu
+  // překrývají (mají stejnou / téměř stejnou pozici v hlavní ose), sdílí
+  // jeden popisek, např. „1, 3, 5, 7“.
+  const projectedSpeakerGroups = [];
+  const labelMergeTolerancePx = 9;
+  [...sectionSpeakers]
+    .map(item => ({...item, cx: ox + item.axisM * pxPerMeter}))
+    .sort((a, b) => a.cx - b.cx || a.index - b.index)
+    .forEach(item => {
+      const last = projectedSpeakerGroups[projectedSpeakerGroups.length - 1];
+      if (last && Math.abs(last.cx - item.cx) <= labelMergeTolerancePx) {
+        last.items.push(item);
+        last.cx = last.items.reduce((sum, x) => sum + x.cx, 0) / last.items.length;
+      } else {
+        projectedSpeakerGroups.push({cx: item.cx, items: [item]});
+      }
+    });
+
+  const speakerNumberLabelsSvg = projectedSpeakerGroups.map(group => {
+    const numbers = group.items.map(item => item.index + 1).sort((a, b) => a - b).join(", ");
+    const strongestInfluence = group.items.some(item => item.influence === "strong")
+      ? "strong"
+      : group.items.some(item => item.influence === "medium") ? "medium" : "low";
+    const fill = strongestInfluence === "strong" ? "#ffd9bd"
+      : strongestInfluence === "medium" ? "#c9a78e" : "#8e98a5";
+    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.72 : 0.48;
+    const labelY = Math.max(14, speakerY - 12);
+    return `<text x="${group.cx}" y="${labelY}" text-anchor="middle"
+      fill="${fill}" opacity="${opacity}" font-size="10.5" font-weight="700"
+      paint-order="stroke" stroke="#0d131a" stroke-width="3" stroke-linejoin="round">${numbers}</text>`;
   }).join("");
 
   const listenerCx = ox + listenerAxisM * pxPerMeter;
@@ -4622,7 +5361,7 @@ function drawSectionView({
     </g>
   `;
 
-  svg.innerHTML = defs + roomRect + `<g clip-path="url(#${clipId})">${coneSvg}</g>` + earLine + floorCeilingLabels + speakersSvg + listenerDimensionSvg + listenerSvg;
+  svg.innerHTML = defs + roomRect + `<g clip-path="url(#${clipId})">${coneSvg}</g>` + earLine + floorCeilingLabels + speakersSvg + speakerNumberLabelsSvg + listenerDimensionSvg + listenerSvg;
 
   if (!appState.sectionGeom) appState.sectionGeom = {};
   appState.sectionGeom[svgId] = {
@@ -4649,7 +5388,7 @@ function drawSectionView({
 
     meta.textContent =
       `Výška místnosti ${heightM.toFixed(1)} m • rovina posluchače ${listenerHeightM.toFixed(2)} m • ` +
-      `úhel ${speaker.coverageAngle.toFixed(0)}° • rozteč ${spacingM.toFixed(2)} m`;
+      `úhel ${speaker.coverageAngle.toFixed(0)}° • rozteč ${spacingM.toFixed(2)} m • oranžová = významný vliv na posluchače`;
   }
 }
 
@@ -5319,6 +6058,15 @@ function updateSpeakerTypeUi() {
   document.getElementById("pendantHeightRow")?.classList.toggle("hidden", type !== "pendant");
 }
 
+let calculateDebounceTimer = null;
+function scheduleCalculate(delayMs = 90) {
+  window.clearTimeout(calculateDebounceTimer);
+  calculateDebounceTimer = window.setTimeout(() => {
+    calculateDebounceTimer = null;
+    calculate();
+  }, delayMs);
+}
+
 function calculate() {
   const room = getRoomShapeConfig();
   const lengthM = room.lengthM;
@@ -5419,9 +6167,9 @@ function calculate() {
   let selectedLayout;
 
   if (room.shape === "circle") {
-    // Kruh: jen dvě geometrické rodiny.
-    // Zarovnaná = striktně mřížka 0°.
-    // Kruhová = soustředné prstence, se středem nebo bez středu.
+    // Kruh: dva zcela nezávislé optimalizátory.
+    // Zarovnaná = pravoúhlá nebo posunutá/hex mřížka.
+    // Kruhová = pouze radiální/kruhové rodiny: prstence, střed a centrovaná hex/trojúhelníková síť.
     const circleMode =
       placementOptimizationMode === "circle-rings"
         ? "circle-rings"
@@ -5475,7 +6223,7 @@ function calculate() {
     recommendedCount = sscLayout.placements.length;
     selectedCount = recommendedCount;
 
-    // v0.130: pro všechny nekruhové tvary je geometrie pevná podle SSC.
+    // v0.133: pro všechny nekruhové tvary je geometrie pevná podle SSC.
     // U L/U/výřezů se pouze vynechají body ležící mimo skutečnou plochu;
     // žádný následný optimizer už body neposouvá ani nezvětšuje rozteče.
     selectedLayout = sscLayout;
@@ -5681,8 +6429,8 @@ function calculate() {
 
   const optimizationModeLabels = {
     regular: "Pevná mřížka – striktní X/Y",
-    "circle-aligned": "Zarovnaná – mřížka 0°",
-    "circle-rings": "Kruhová – soustředné prstence",
+    "circle-aligned": "Zarovnaná – mřížka / posunutá hex mřížka",
+    "circle-rings": "Kruhová – prstence / střed / hex",
     balanced: "Vyvážené – vždy geometrická síť",
     coverage: "Nejlepší pokrytí – volná optimalizace"
   };
@@ -5705,6 +6453,19 @@ function calculate() {
       ? `≈ ${actualSpacingM.toFixed(1).replace(".", ",")} m`
       : "—";
     spacingSummary.title = "Medián vzdálenosti k nejbližšímu sousednímu reproduktoru.";
+  }
+  const loneliestSpeakerValue = document.getElementById("loneliestSpeakerValue");
+  if (loneliestSpeakerValue) {
+    const loneliest = loneliestSpeakerNearestDistance(placements);
+    if (loneliest) {
+      loneliestSpeakerValue.textContent =
+        `Repro ${loneliest.speakerIndex + 1} • ${loneliest.distanceM.toFixed(2).replace(".", ",")} m k nejbližšímu`;
+      loneliestSpeakerValue.title =
+        `Nejbližší soused je repro ${loneliest.nearestIndex + 1}. Hodnota je největší z minimálních vzdáleností mezi jednotlivými reproduktory.`;
+    } else {
+      loneliestSpeakerValue.textContent = "—";
+      loneliestSpeakerValue.title = "Pro jediný reproduktor nelze vzdálenost k sousednímu reproduktoru určit.";
+    }
   }
   updateAmplifierUI(amplifierRecommendation);
   updatePriceSummary({ speaker, speakerCount: effectiveCoverage.count, amplifierRecommendation });
@@ -5810,19 +6571,19 @@ function calculate() {
 
 populateSpeakerOverrideOptions();
 
-document.getElementById("speakerOverride").addEventListener("change", calculate);
+document.getElementById("speakerOverride").addEventListener("change", () => scheduleCalculate());
 document.getElementById("coverageDensityFloor")?.addEventListener("change", () => {
   const main = document.getElementById("coverageDensity");
   const floor = document.getElementById("coverageDensityFloor");
   if (main && floor) main.value = floor.value;
-  calculate();
+  scheduleCalculate();
 });
 
 document.getElementById("placementOptimizationFloor")?.addEventListener("change", () => {
   const main = document.getElementById("placementOptimization");
   const floor = document.getElementById("placementOptimizationFloor");
   if (main && floor) main.value = floor.value;
-  calculate();
+  scheduleCalculate();
 });
 
 document.getElementById("speakerType").addEventListener("change", () => {
@@ -5833,7 +6594,7 @@ document.getElementById("speakerType").addEventListener("change", () => {
 document.getElementById("ambientNoisePreset").addEventListener("change", (e) => {
   const custom = e.target.value === "custom";
   document.getElementById("ambientCustomRow").classList.toggle("hidden", !custom);
-  calculate();
+  scheduleCalculate();
 });
 
 document.getElementById("copySpeakerCoordinates")?.addEventListener("click", async () => {
@@ -5946,7 +6707,7 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
   updateRoomShapeUi();
   appState.listenerXFt = null;
   appState.listenerYFt = null;
-  calculate();
+  scheduleCalculate();
 });
 
 
@@ -5962,7 +6723,7 @@ document.getElementById("roomShape")?.addEventListener("change", () => {
         appState.listenerXFt = null;
         appState.listenerYFt = null;
       }
-      calculate();
+      scheduleCalculate();
     });
   });
 
