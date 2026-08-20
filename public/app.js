@@ -1,4 +1,4 @@
-const APP_VERSION = "0.142";
+const APP_VERSION = "0.143";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -727,9 +727,10 @@ function updatePlacementOptimizationAvailability() {
 
   if (shape === "rectangle") {
     options = [
-      {value:"regular", label:"Pevná mřížka"}
+      {value:"regular", label:"Mřížka"},
+      {value:"rect-optimized", label:"Optimalizovaná"}
     ];
-    preferred = "regular";
+    if (!["regular","rect-optimized"].includes(preferred)) preferred = "regular";
   } else if (shape === "circle") {
     options = [
       {value:"circle-aligned", label:"Zarovnaná"},
@@ -4022,6 +4023,71 @@ function buildCircularOnlyCandidates(room, coverage, speaker) {
   return candidates;
 }
 
+
+function evaluateRectangleAgainstSscReference(room, placements, coverage, speaker) {
+  if (!placements?.length || room.shape !== "rectangle") return {passes:false, overallRatio:0};
+
+  const reference = buildSscCircleGeometryReference(coverage, speaker);
+  const placementsM = placements.map(p => ({xM:p.x/FEET_PER_METER, yM:p.y/FEET_PER_METER}));
+  const w = room.widthM;
+  const l = room.lengthM;
+  const nx = 34;
+  const ny = 34;
+  let minRatio = Infinity;
+
+  for (let iy=0; iy<=ny; iy++) {
+    const yM = l * iy / ny;
+    for (let ix=0; ix<=nx; ix++) {
+      const xM = w * ix / nx;
+      const wallDistanceM = Math.min(xM, w-xM, yM, l-yM);
+      const vals = circleTopContributionsAtPoint(xM,yM,placementsM,reference,speaker,4);
+      const isBoundary = wallDistanceM <= 1e-8;
+      let ratio;
+      if (isBoundary) {
+        ratio = (vals[0] || 0) / Math.max(1e-12, reference.boundaryScore);
+      } else {
+        const top4 = vals.reduce((sum,v)=>sum+v,0);
+        const t = Math.max(0,Math.min(1,wallDistanceM/reference.edgeDepthM));
+        const required = reference.boundaryScore + (reference.interiorScore-reference.boundaryScore)*t;
+        ratio = top4 / Math.max(1e-12,required);
+      }
+      minRatio = Math.min(minRatio,ratio);
+    }
+  }
+
+  if (!Number.isFinite(minRatio)) minRatio = 0;
+  return {passes:minRatio>=0.995, overallRatio:minRatio, reference};
+}
+
+function chooseRectangleOptimizedDesign(room, coverage, speaker) {
+  if (room.shape !== "rectangle") return null;
+  const maxCount = Math.max(coverage.count + 4, 8);
+
+  for (let count=1; count<=maxCount; count++) {
+    const candidates = buildLayoutCandidates(count, coverage, room, "balanced", "full")
+      .filter(c => c?.isStructuredLattice !== false && c?.placements?.length === count);
+    const passing = [];
+    for (const candidate of candidates) {
+      const benchmark = evaluateRectangleAgainstSscReference(room,candidate.placements,coverage,speaker);
+      if (!benchmark.passes) continue;
+      passing.push({...candidate, count, sscBenchmark:benchmark});
+    }
+    if (passing.length) {
+      passing.sort((a,b) =>
+        (b.sscBenchmark?.overallRatio||0) - (a.sscBenchmark?.overallRatio||0) ||
+        (b.alignmentWeight||0) - (a.alignmentWeight||0)
+      );
+      const best = passing[0];
+      return {
+        ...best,
+        method:`Optimalizovaná ${best.method || "mřížka"} • SSC benchmark`,
+        source:"rectangle-ssc-optimized"
+      };
+    }
+  }
+  return null;
+}
+
 function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
   const speaker = acousticContext?.speaker || null;
 
@@ -4942,7 +5008,7 @@ function updateHeatmapScaleLabels(heatmap) {
 }
 
 let audioObjectUrl = null;
-const AUDIO_BASE_VOLUME = 0.32;
+const AUDIO_BASE_VOLUME = 1;
 let audioUserVolume = 1;
 
 function updateSpatialAudioGain(listenerSPL = null) {
@@ -5047,19 +5113,28 @@ function drawFloorPlan({
       transform="rotate(-90 ${ox - 26} ${H/2})">${lengthM.toFixed(1)} m</text>
   `;
 
-  // Orientace pohledů/řezů podle os použitých ve spodních řezech.
+  // Technické značky směru pohledu pro řezy. Krátký dřík + plný trojúhelník
+  // jsou čitelnější než dlouhé šipky a neruší samotný půdorys.
+  const aY = Math.max(18, oy - 18);
+  const aX = ox + Math.min(52, roomW * 0.15);
+  const bX = Math.min(W - 18, ox + roomW + 20);
+  const bY = oy + roomH - Math.min(52, roomH * 0.15);
   const viewDirections = `
     <g class="floor-view-direction" pointer-events="none">
-      <line x1="${ox}" y1="${Math.max(20, oy - 22)}" x2="${Math.min(W - 18, ox + 118)}" y2="${Math.max(20, oy - 22)}"
-        stroke="#ff7a1a" stroke-width="1.5"/>
-      <path d="M ${Math.min(W - 18, ox + 118)} ${Math.max(20, oy - 22)} l -8 -4 l 0 8 z" fill="#ff7a1a"/>
-      <text x="${ox}" y="${Math.max(12, oy - 30)}" fill="#ff9a4d" font-size="10" font-weight="700">A–A Boční řez</text>
-
-      <line x1="${Math.min(W - 26, ox + roomW + 24)}" y1="${oy + roomH}" x2="${Math.min(W - 26, ox + roomW + 24)}" y2="${Math.max(18, oy + roomH - 118)}"
-        stroke="#ff7a1a" stroke-width="1.5"/>
-      <path d="M ${Math.min(W - 26, ox + roomW + 24)} ${Math.max(18, oy + roomH - 118)} l -4 8 l 8 0 z" fill="#ff7a1a"/>
-      <text x="${Math.min(W - 18, ox + roomW + 32)}" y="${oy + roomH - 4}" fill="#ff9a4d" font-size="10" font-weight="700"
-        transform="rotate(-90 ${Math.min(W - 18, ox + roomW + 32)} ${oy + roomH - 4})">B–B Čelní řez</text>
+      <g aria-label="A–A Boční řez">
+        <line x1="${aX - 26}" y1="${aY}" x2="${aX - 7}" y2="${aY}" stroke="#ff7a1a" stroke-width="2"/>
+        <path d="M ${aX} ${aY} L ${aX - 9} ${aY - 6} L ${aX - 9} ${aY + 6} Z" fill="#ff7a1a"/>
+        <circle cx="${aX - 34}" cy="${aY}" r="10" fill="#101820" stroke="#ff7a1a" stroke-width="1.5"/>
+        <text x="${aX - 34}" y="${aY + 3.5}" text-anchor="middle" fill="#ff9a4d" font-size="9" font-weight="800">A</text>
+        <text x="${aX - 48}" y="${aY - 14}" fill="#ff9a4d" font-size="9" font-weight="700">A–A BOČNÍ</text>
+      </g>
+      <g aria-label="B–B Čelní řez">
+        <line x1="${bX}" y1="${bY + 26}" x2="${bX}" y2="${bY + 7}" stroke="#ff7a1a" stroke-width="2"/>
+        <path d="M ${bX} ${bY} L ${bX - 6} ${bY + 9} L ${bX + 6} ${bY + 9} Z" fill="#ff7a1a"/>
+        <circle cx="${bX}" cy="${bY + 34}" r="10" fill="#101820" stroke="#ff7a1a" stroke-width="1.5"/>
+        <text x="${bX}" y="${bY + 37.5}" text-anchor="middle" fill="#ff9a4d" font-size="9" font-weight="800">B</text>
+        <text x="${bX + 15}" y="${bY + 38}" fill="#ff9a4d" font-size="9" font-weight="700">B–B ČELNÍ</text>
+      </g>
     </g>
   `;
 
@@ -6263,6 +6338,19 @@ function calculate() {
       circleRequiredCoveragePct:circleDesign.requiredDesignCoveragePct,
       circleRemovedSymmetricCount:circleDesign.removedSymmetricCount || 0
     };
+  } else if (room.shape === "rectangle" && placementOptimizationMode === "rect-optimized") {
+    const rectDesign = chooseRectangleOptimizedDesign(room, coverage, speaker);
+    if (!rectDesign?.placements?.length) {
+      alert("Pro obdélník se nepodařilo vytvořit optimalizované rozmístění podle SSC benchmarku.");
+      return;
+    }
+    recommendedCount = rectDesign.placements.length;
+    selectedCount = recommendedCount;
+    selectedLayout = rectDesign;
+    countRecommendation = {
+      recommendedCount, chosen:rectDesign, evaluated:[], toleranceFloor:null,
+      targetMet:null, source:"rectangle-ssc-optimized", optimizationPolicy:null
+    };
   } else {
     const sscLayout = getSscRegularAutomaticLayout(
       basePlacements,
@@ -6481,6 +6569,7 @@ function calculate() {
   const optimizationModeLabels = {
     regular: "Pevná mřížka – striktní X/Y",
     "circle-aligned": "Zarovnaná – mřížka / posunutá hex mřížka",
+    "rect-optimized": "Optimalizovaná – mřížka / posunutá hex mřížka",
     "circle-rings": "Kruhová – prstence / střed / hex",
     balanced: "Vyvážené – vždy geometrická síť",
     coverage: "Nejlepší pokrytí – volná optimalizace"

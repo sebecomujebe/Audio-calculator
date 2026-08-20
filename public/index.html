@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.142" />
+  <link rel="stylesheet" href="style.css?v=0.143" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.142</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.143</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -397,9 +397,9 @@
                 Spusťte výchozí demo nebo vyberte vlastní skladbu. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
               </p>
               <div class="floor-audio-tools">
-                <label class="audio-file-label audio-control-button" for="audioFileInput">Vybrat vlastní skladbu</label>
-                <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
                 <button id="audioPlayToggle" class="secondary-button small-button audio-play-button audio-control-button" type="button">Spustit demo</button>
+                <label class="audio-file-label" for="audioFileInput">Vybrat vlastní skladbu</label>
+                <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
                 <label class="audio-volume-control" for="audioVolume">
                   <span>Hlasitost</span>
                   <input id="audioVolume" class="audio-volume" type="range" min="0" max="100" value="100" step="1" aria-label="Hlasitost audio ukázky" />
@@ -613,6 +613,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.142"></script>
+  <script src="app.js?v=0.143"></script>
 </body>
 </html>

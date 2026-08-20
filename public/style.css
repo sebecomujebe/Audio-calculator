@@ -2379,7 +2379,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .technical-details-hint,
 .coordinates-toggle-button,
 #copySpeakerCoordinates,
-.audio-control-button {
+.audio-play-button.audio-control-button {
   border-color: #ff7a1a !important;
   background: #ff7a1a !important;
   color: #101820 !important;
@@ -2389,7 +2389,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .technical-details-hint:hover,
 .coordinates-toggle-button:hover,
 #copySpeakerCoordinates:hover,
-.audio-control-button:hover {
+.audio-play-button.audio-control-button:hover {
   background: #ff8b35 !important;
   border-color: #ff8b35 !important;
 }
@@ -2468,3 +2468,22 @@ input[type="number"]::-webkit-outer-spin-button {
   .result-speaker-image { width: 64px; height: 64px; flex-basis: 64px; }
   .price-product-image { width: 48px; height: 48px; flex-basis: 48px; }
 }
+
+
+/* v0.143 – audio a technické značky řezů */
+.audio-volume {
+  width: 96px;
+  min-width: 96px;
+  margin: 0;
+}
+.audio-file-label {
+  background: rgba(255,255,255,.04) !important;
+  border-color: rgba(255,255,255,.18) !important;
+  color: #e5ebf2 !important;
+  box-shadow: none !important;
+}
+.audio-file-label:hover {
+  background: rgba(255,255,255,.08) !important;
+  border-color: rgba(255,255,255,.26) !important;
+}
+.floor-view-direction text { letter-spacing: .02em; }
