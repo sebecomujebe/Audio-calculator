@@ -2612,3 +2612,126 @@ input[type="number"]::-webkit-outer-spin-button {
   .amplifier-panel .amp-result-main { align-items: flex-start; }
   .amplifier-product-image-slot { width: 112px; height: 88px; flex-basis: 112px; }
 }
+
+/* v0.149 – sbalené montážní rozteče pod technickými detaily */
+.spacing-plan-details{margin-top:18px;}
+.spacing-plan-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;cursor:pointer;list-style:none;}
+.spacing-plan-summary::-webkit-details-marker{display:none;}
+.spacing-plan-summary h2{margin:2px 0 0;}
+.spacing-plan-toggle-button{flex:0 0 auto;color:#ff7a1a;font-weight:800;font-size:.86rem;}
+.spacing-plan-details[open] .spacing-plan-toggle-button{font-size:0;}
+.spacing-plan-details[open] .spacing-plan-toggle-button::before{content:"Sbalit";font-size:.86rem;}
+.spacing-plan-content{padding-top:8px;}
+.spacing-plan-details:not([open]) .spacing-plan-content{display:none;}
+
+/* v0.149 – široký náhled doporučeného zesilovače napravo od textu */
+.amplifier-panel .amp-result-main{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(280px,420px);
+  align-items:center;
+  gap:28px;
+}
+.amplifier-panel .amp-result-copy{min-width:0;}
+.amplifier-product-image-slot{
+  width:100%;
+  height:132px;
+  min-width:0;
+  background:transparent;
+  border:0;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.amplifier-product-image-slot[hidden]{display:none!important;}
+.amplifier-product-image-slot img{width:100%;height:100%;object-fit:contain;object-position:center;display:block;}
+.amp-product-specs{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:6px 22px;
+  margin:14px 0 0;
+  max-width:620px;
+}
+.amp-product-specs>div{display:flex;justify-content:space-between;gap:14px;border-top:1px solid rgba(132,151,171,.18);padding-top:6px;}
+.amp-product-specs dt{color:#9fb0c2;font-size:12px;}
+.amp-product-specs dd{margin:0;color:#f4f7fb;font-size:12px;font-weight:800;text-align:right;}
+@media(max-width:850px){
+  .amplifier-panel .amp-result-main{grid-template-columns:1fr;gap:16px;}
+  .amplifier-product-image-slot{width:min(100%,520px);height:120px;justify-self:start;}
+}
+@media(max-width:560px){
+  .amp-product-specs{grid-template-columns:1fr;}
+  .amplifier-product-image-slot{height:100px;}
+}
+
+
+/* v0.150 – přeskupení karty reproduktorů */
+.speaker-result-header-v2 {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(120px, 180px) minmax(300px, 360px);
+  align-items: center;
+  gap: 22px;
+}
+.speaker-result-info {
+  min-width: 0;
+}
+.speaker-result-hero-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 118px;
+}
+.result-speaker-image-large {
+  width: 100%;
+  max-width: 170px;
+  height: 118px;
+  object-fit: contain;
+  background: transparent;
+  border-radius: 0;
+}
+.result-controls-vertical {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+.result-controls-vertical .speaker-selector-wrap {
+  width: 100%;
+  min-width: 0;
+}
+.result-controls-vertical .speaker-selector-wrap select {
+  width: 100%;
+}
+/* v2 overrides old with-image style in this card */
+.speaker-result-header-v2 .result-title-with-image {
+  align-items: initial;
+  gap: 0;
+}
+.speaker-result-header-v2 .result-speaker-image {
+  flex: 0 0 auto;
+}
+@media (max-width: 980px) {
+  .speaker-result-header-v2 {
+    grid-template-columns: minmax(240px,1fr) minmax(110px,150px) minmax(260px,320px);
+    gap: 16px;
+  }
+  .result-speaker-image-large {
+    max-width: 150px;
+    height: 104px;
+  }
+}
+@media (max-width: 760px) {
+  .speaker-result-header-v2 {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+  .speaker-result-hero-image-wrap {
+    width: 100%;
+    justify-content: flex-start;
+    min-height: 0;
+  }
+  .result-speaker-image-large {
+    max-width: 140px;
+    height: 96px;
+  }
+}

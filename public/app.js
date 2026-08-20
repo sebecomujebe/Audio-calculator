@@ -6395,6 +6395,10 @@ function updateAmplifierUI(result) {
   const capacity = document.getElementById("amplifierCapacityValue");
   const utilization = document.getElementById("amplifierUtilizationValue");
   const detail = document.getElementById("amplifierDetail");
+  const zoneOutputs = document.getElementById("amplifierZoneOutputsValue");
+  const perOutput = document.getElementById("amplifierPerOutputValue");
+  const dsp = document.getElementById("amplifierDspValue");
+  const dante = document.getElementById("amplifierDanteValue");
 
     const reservePct = Math.max(0, Math.round((result.headroomFactor - 1) * 100));
   const requiredLabel = document.getElementById("amplifierRequiredPowerLabel");
@@ -6409,6 +6413,10 @@ function updateAmplifierUI(result) {
     capacity.textContent = "—";
     utilization.textContent = "—";
     detail.textContent = "V databázi není aktivní zesilovač, který splní požadovaný výkon a limity rozdělení zóny.";
+    if (zoneOutputs) zoneOutputs.textContent = "—";
+    if (perOutput) perOutput.textContent = "—";
+    if (dsp) dsp.textContent = "—";
+    if (dante) dante.textContent = "—";
     return;
   }
 
@@ -6421,6 +6429,10 @@ function updateAmplifierUI(result) {
   detail.textContent =
     `${result.splitsNeeded} výkonový${result.splitsNeeded === 1 ? "" : "é"} výstup${result.splitsNeeded === 1 ? "" : "y"} pro zónu; ` +
     `${result.amp.powerPerZone.toFixed(0)} W na výstup; ${dspText}, ${danteText}.`;
+  if (zoneOutputs) zoneOutputs.textContent = `${Math.max(1, result.amp.effectiveZones || result.splitsNeeded || 1)}`;
+  if (perOutput) perOutput.textContent = `${result.amp.powerPerZone.toFixed(0)} W`;
+  if (dsp) dsp.textContent = result.amp.hasDSP ? "Ano" : "Ne";
+  if (dante) dante.textContent = result.amp.hasDante ? "Ano" : "Ne";
 }
 
 function updateSpeakerTypeUi() {

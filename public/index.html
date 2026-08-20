@@ -265,11 +265,10 @@
 
       <section class="results-column">
         <div class="panel result-overview-panel">
-          <div class="speaker-result-header">
-            <div>
+          <div class="speaker-result-header speaker-result-header-v2">
+            <div class="speaker-result-info">
               <div class="eyebrow">REPRODUKTORY</div>
-              <div class="result-title-row result-title-with-image">
-                <img id="resultSpeakerImage" class="result-speaker-image" alt="" hidden>
+              <div class="result-title-row">
                 <div class="result-title-text">
                   <div class="result-title-name-row">
                     <h2 id="resultTitle">—</h2>
@@ -280,7 +279,11 @@
               <p id="recommendationReason" class="recommendation-reason">—</p>
             </div>
 
-            <div class="result-controls">
+            <div class="speaker-result-hero-image-wrap">
+              <img id="resultSpeakerImage" class="result-speaker-image result-speaker-image-large" alt="" hidden>
+            </div>
+
+            <div class="result-controls result-controls-vertical">
               <div class="speaker-selector-wrap">
                 <label for="speakerOverride">Jiný model</label>
                 <select id="speakerOverride">
@@ -421,19 +424,6 @@
 
 
 
-        <div class="panel spacing-plan-panel">
-          <div class="section-heading result-heading">
-            <div>
-              <div class="eyebrow">MONTÁŽNÍ ROZTEČE</div>
-              <h2>Vzdálenosti mezi reproduktory</h2>
-              <p class="spacing-plan-note">Nejbližší sousedé jsou propojeni neprotínající se triangulací. Kóty uvádějí vzdálenost střed–střed.</p>
-            </div>
-          </div>
-          <div class="spacing-plan-wrap">
-            <svg id="spacingPlan" viewBox="0 0 900 560" role="img" aria-label="Montážní půdorys s roztečemi mezi reproduktory"></svg>
-          </div>
-        </div>
-
         <div class="section-views-stack">
           <div class="panel section-view-panel">
           <div class="section-heading result-heading">
@@ -538,6 +528,22 @@
           </div>
         </details>
 
+        <details class="panel spacing-plan-panel spacing-plan-details">
+          <summary class="spacing-plan-summary">
+            <div>
+              <div class="eyebrow">MONTÁŽNÍ ROZTEČE</div>
+              <h2>Vzdálenosti mezi reproduktory</h2>
+              <p class="spacing-plan-note">Nejbližší sousedé jsou propojeni neprotínající se triangulací. Kóty uvádějí vzdálenost střed–střed.</p>
+            </div>
+            <span class="spacing-plan-toggle-button">Zobrazit</span>
+          </summary>
+          <div class="spacing-plan-content">
+            <div class="spacing-plan-wrap">
+              <svg id="spacingPlan" viewBox="0 0 900 560" role="img" aria-label="Montážní půdorys s roztečemi mezi reproduktory"></svg>
+            </div>
+          </div>
+        </details>
+
         <details class="panel speaker-coordinates-panel coordinates-details">
           <summary class="coordinates-summary">
             <div>
@@ -580,11 +586,17 @@
           </div>
           <div class="amp-result">
             <div class="amp-result-main">
-              <div id="amplifierProductImageSlot" class="product-image-slot amplifier-product-image-slot" data-product-image-slot="amplifier" hidden></div>
               <div class="amp-result-copy">
                 <strong id="amplifierModelValue">—</strong>
                 <p id="amplifierDetail" class="recommendation-reason">—</p>
+                <dl class="amp-product-specs" aria-label="Parametry doporučeného zesilovače">
+                  <div><dt>Výstupy pro zóny</dt><dd id="amplifierZoneOutputsValue">—</dd></div>
+                  <div><dt>Výkon na výstup</dt><dd id="amplifierPerOutputValue">—</dd></div>
+                  <div><dt>DSP</dt><dd id="amplifierDspValue">—</dd></div>
+                  <div><dt>Dante</dt><dd id="amplifierDanteValue">—</dd></div>
+                </dl>
               </div>
+              <div id="amplifierProductImageSlot" class="product-image-slot amplifier-product-image-slot" data-product-image-slot="amplifier" hidden></div>
             </div>
           </div>
           <dl class="summary-list amp-summary">
