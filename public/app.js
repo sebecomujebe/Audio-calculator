@@ -1,4 +1,4 @@
-const APP_VERSION = "0.146";
+const APP_VERSION = "0.148";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -194,7 +194,8 @@ function applyAmplifierSheet(rows) {
     networking: r["Síťové audio"] || "",
     recommendedFor: r["Doporučené použití"] || "",
     productNo: r["PRODUCTNO"] || "",
-    url: r["URL produktu"] || ""
+    url: r["URL produktu"] || "",
+    image: r["Obrázek"] || r["Obrazek"] || r["Obrázky"] || r["Obrazky"] || ""
   })).filter(a => a.active && a.model && a.powerPerZone > 0 && a.effectiveZones > 0);
   if (mapped.length >= 5) AMPLIFIERS = mapped;
 }
@@ -5203,10 +5204,10 @@ function drawFloorPlan({
 
   const dims = `
     <text x="${W/2}" y="${oy + roomH + 34}" text-anchor="middle"
-      fill="#dfe6ee" font-size="16" font-weight="700">${widthM.toFixed(1)} m</text>
+      fill="#dfe6ee" font-size="16" font-weight="700">Šířka: ${widthM.toFixed(1)} m</text>
     <text x="${ox - 26}" y="${H/2}" text-anchor="middle"
       fill="#dfe6ee" font-size="16" font-weight="700"
-      transform="rotate(-90 ${ox - 26} ${H/2})">${lengthM.toFixed(1)} m</text>
+      transform="rotate(-90 ${ox - 26} ${H/2})">Délka: ${lengthM.toFixed(1)} m</text>
   `;
 
   // Technické značky směru pohledu pro řezy. Krátký dřík + plný trojúhelník
@@ -5300,6 +5301,93 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
     ...appState.latest,
     floorGeom: { W, H, pad, scale, roomW, roomH, ox, oy, lengthFt, widthFt }
   };
+}
+
+
+function delaunayTriangulation(points) {
+  if (!Array.isArray(points) || points.length < 3) return [];
+  const pts = points.map((p, i) => ({x:p.x, y:p.y, i}));
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const p of pts) { minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y); }
+  const d = Math.max(maxX-minX, maxY-minY, 1);
+  const mx=(minX+maxX)/2, my=(minY+maxY)/2;
+  const superPts=[
+    {x:mx-20*d,y:my-10*d,i:-1},
+    {x:mx,y:my+20*d,i:-2},
+    {x:mx+20*d,y:my-10*d,i:-3}
+  ];
+  const all=pts.concat(superPts);
+  const circum=(a,b,c)=>{
+    const ax=a.x, ay=a.y, bx=b.x, by=b.y, cx=c.x, cy=c.y;
+    const den=2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+    if (Math.abs(den)<1e-10) return {x:0,y:0,r2:Infinity};
+    const a2=ax*ax+ay*ay,b2=bx*bx+by*by,c2=cx*cx+cy*cy;
+    const ux=(a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/den;
+    const uy=(a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/den;
+    const r2=(ux-ax)*(ux-ax)+(uy-ay)*(uy-ay);
+    return {x:ux,y:uy,r2};
+  };
+  let triangles=[{a:pts.length,b:pts.length+1,c:pts.length+2}];
+  for (let pi=0; pi<pts.length; pi++) {
+    const p=all[pi], bad=[];
+    for (let ti=0; ti<triangles.length; ti++) {
+      const t=triangles[ti], cc=circum(all[t.a],all[t.b],all[t.c]);
+      const dd=(p.x-cc.x)*(p.x-cc.x)+(p.y-cc.y)*(p.y-cc.y);
+      if (dd <= cc.r2 + 1e-8) bad.push(ti);
+    }
+    const edgeMap=new Map();
+    const addEdge=(u,v)=>{ const a=Math.min(u,v), b=Math.max(u,v), k=`${a}:${b}`; edgeMap.set(k,(edgeMap.get(k)||0)+1); };
+    for (const ti of bad) { const t=triangles[ti]; addEdge(t.a,t.b); addEdge(t.b,t.c); addEdge(t.c,t.a); }
+    const badSet=new Set(bad); triangles=triangles.filter((_,i)=>!badSet.has(i));
+    for (const [k,count] of edgeMap) if (count===1) { const [a,b]=k.split(':').map(Number); triangles.push({a,b,c:pi}); }
+  }
+  return triangles.filter(t=>t.a<pts.length && t.b<pts.length && t.c<pts.length);
+}
+
+function spacingPlanEdges(placements, room) {
+  const points=placements.map((p,i)=>({x:p.x/FEET_PER_METER,y:p.y/FEET_PER_METER,i}));
+  if (points.length < 2) return [];
+  if (points.length === 2) return [{a:0,b:1}];
+  const triangles=delaunayTriangulation(points);
+  const edges=new Map();
+  const add=(a,b)=>{ const lo=Math.min(a,b), hi=Math.max(a,b), k=`${lo}:${hi}`; edges.set(k,{a:lo,b:hi}); };
+  for (const t of triangles) { add(t.a,t.b); add(t.b,t.c); add(t.c,t.a); }
+  // U konkávních půdorysů nezobrazujeme hranu, která vede přes výřez / mimo místnost.
+  const segmentInside=(a,b)=>{
+    if (!room) return true;
+    const pa=points[a], pb=points[b];
+    for (let k=1;k<12;k++) {
+      const q=k/12, x=pa.x+(pb.x-pa.x)*q, y=pa.y+(pb.y-pa.y)*q;
+      if (!isPointInsideRoomMeters(x,y,room)) return false;
+    }
+    return true;
+  };
+  return [...edges.values()].filter(e=>segmentInside(e.a,e.b));
+}
+
+function drawSpacingPlan({lengthM,widthM,room,placements}) {
+  const svg=document.getElementById('spacingPlan');
+  if (!svg) return;
+  const W=900,H=560,pad=72;
+  const scale=Math.min((W-pad*2)/Math.max(0.1,widthM),(H-pad*2)/Math.max(0.1,lengthM));
+  const roomW=widthM*scale, roomH=lengthM*scale, ox=(W-roomW)/2, oy=(H-roomH)/2;
+  const shape=roomSvgShape(room,ox,oy,scale);
+  const pts=placements.map((p,i)=>({x:p.x/FEET_PER_METER,y:p.y/FEET_PER_METER,i}));
+  const edges=spacingPlanEdges(placements,room);
+  const defs=`<defs><filter id="spacing-label-shadow" x="-30%" y="-60%" width="160%" height="220%"><feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#000" flood-opacity="0.7"/></filter></defs>`;
+  const edgeSvg=edges.map(e=>{
+    const a=pts[e.a],b=pts[e.b],x1=ox+a.x*scale,y1=oy+a.y*scale,x2=ox+b.x*scale,y2=oy+b.y*scale;
+    const dist=Math.hypot(b.x-a.x,b.y-a.y), mx=(x1+x2)/2,my=(y1+y2)/2;
+    const label=`${dist.toFixed(2).replace('.',',')} m`, w=Math.max(42,label.length*6.4+12);
+    return `<g class="spacing-edge"><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8fa0b2" stroke-width="1.35" opacity="0.88"/><g transform="translate(${mx} ${my})" filter="url(#spacing-label-shadow)"><rect x="${-w/2}" y="-9" width="${w}" height="18" rx="5" fill="#101820" stroke="#536273" stroke-width="0.8"/><text x="0" y="3.5" text-anchor="middle" fill="#f2f5f8" font-size="9.5" font-weight="700">${label}</text></g></g>`;
+  }).join('');
+  const iconSize=30;
+  const speakerSvg=pts.map(p=>{
+    const cx=ox+p.x*scale, cy=oy+p.y*scale;
+    return `<g><circle cx="${cx}" cy="${cy}" r="${iconSize/2+4}" fill="#101820" stroke="#ff7a1a" stroke-width="1.8"/><image href="assets/repro_ikona.png" x="${cx-iconSize/2}" y="${cy-iconSize/2}" width="${iconSize}" height="${iconSize}" preserveAspectRatio="xMidYMid meet"/><text x="${cx}" y="${cy+28}" text-anchor="middle" fill="#dfe6ee" font-size="11" font-weight="800">${p.i+1}</text></g>`;
+  }).join('');
+  const dims=`<text x="${W/2}" y="${oy+roomH+34}" text-anchor="middle" fill="#dfe6ee" font-size="15" font-weight="700">Šířka: ${widthM.toFixed(1)} m</text><text x="${ox-26}" y="${H/2}" text-anchor="middle" fill="#dfe6ee" font-size="15" font-weight="700" transform="rotate(-90 ${ox-26} ${H/2})">Délka: ${lengthM.toFixed(1)} m</text>`;
+  svg.innerHTML=defs+shape+edgeSvg+speakerSvg+dims;
 }
 
 
@@ -6013,6 +6101,31 @@ function getSpeakerProductImageSrc(speaker) {
   return `assets/products/${raw}`;
 }
 
+function getAmplifierProductImageSrc(amplifier) {
+  if (!amplifier) return "";
+  let raw = String(amplifier.image || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
+  if (raw.startsWith("assets/")) return raw;
+  if (!/\.[a-z0-9]{2,5}$/i.test(raw)) raw += ".webp";
+  return `assets/products/${raw}`;
+}
+
+function renderAmplifierProductImage(amplifier) {
+  const slot = document.getElementById("amplifierProductImageSlot");
+  if (!slot) return;
+  const src = getAmplifierProductImageSrc(amplifier);
+  if (!src) {
+    slot.hidden = true;
+    slot.innerHTML = "";
+    return;
+  }
+  slot.hidden = false;
+  slot.innerHTML = `<img src="${escapeHtml(src)}" alt="${escapeHtml(amplifier?.model ? `Obrázek ${amplifier.model}` : "Obrázek zesilovače")}">`;
+  const img = slot.querySelector("img");
+  if (img) img.onerror = () => { slot.hidden = true; slot.innerHTML = ""; };
+}
+
 function renderSpeakerProductImage(speaker) {
   const img = document.getElementById("resultSpeakerImage");
   if (!img) return;
@@ -6049,7 +6162,7 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
     rows.push({
       name: `${a.manufacturer || ""} ${a.model}`.trim(),
       qty: amplifierRecommendation.ampCount || 1,
-      imageSrc: "",
+      imageSrc: getAmplifierProductImageSrc(a),
       priceItem: getPriceByAvCode(a.avCode)
     });
   }
@@ -6291,6 +6404,7 @@ function updateAmplifierUI(result) {
   required.textContent = `${result.requiredPower.toFixed(0)} W`;
 
   if (!result.found) {
+    renderAmplifierProductImage(null);
     model.textContent = "Nenalezen vhodný model";
     capacity.textContent = "—";
     utilization.textContent = "—";
@@ -6298,6 +6412,7 @@ function updateAmplifierUI(result) {
     return;
   }
 
+  renderAmplifierProductImage(result.amp);
   model.textContent = `${result.ampCount > 1 ? result.ampCount + "× " : ""}${result.amp.model}`;
   capacity.textContent = `${result.totalCapacity.toFixed(0)} W`;
   utilization.textContent = `${result.utilization.toFixed(0)} %`;
@@ -6835,6 +6950,7 @@ function calculate() {
     listenerYFt: appState.listenerYFt,
     listenerSPL
   });
+  drawSpacingPlan({lengthM, widthM, room, placements});
   drawAllSectionViews();
   syncFloorControlsFromMain();
 }
