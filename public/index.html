@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Calculator</title>
-  <link rel="stylesheet" href="style.css?v=0.140" />
+  <link rel="stylesheet" href="style.css?v=0.142" />
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
       <div>
-        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.140</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
+        <div class="hero-meta"><div class="eyebrow">AUDIO CALCULATOR</div><div class="version-badge">v0.142</div><div id="dataSourceStatus" class="data-source-status data-fallback">Databáze produktů – lokální záloha</div></div>
         <h1>Návrh ozvučení prostoru</h1>
         <p class="lead">Zadejte základní parametry místnosti a kalkulátor navrhne vhodný reproduktor, počet kusů, rozmístění, transformátorový tap a orientační SPL.</p>
       </div>
@@ -266,9 +266,14 @@
           <div class="speaker-result-header">
             <div>
               <div class="eyebrow">REPRODUKTORY</div>
-              <div class="result-title-row">
-                <h2 id="resultTitle">—</h2>
-                <span id="statusBadge" class="badge status-recommended">Doporučeno</span>
+              <div class="result-title-row result-title-with-image">
+                <img id="resultSpeakerImage" class="result-speaker-image" alt="" hidden>
+                <div class="result-title-text">
+                  <div class="result-title-name-row">
+                    <h2 id="resultTitle">—</h2>
+                    <span id="statusBadge" class="badge status-recommended">Doporučeno</span>
+                  </div>
+                </div>
               </div>
               <p id="recommendationReason" class="recommendation-reason">—</p>
             </div>
@@ -304,7 +309,6 @@
             </div>
           </div>
 
-          <div id="speakerProductImageSlot" class="product-image-slot" data-product-image-slot="speaker" hidden></div>
         </div>
 
         <div class="panel spl-overview-panel">
@@ -390,14 +394,18 @@
             </div>
             <div class="audio-demo" aria-label="Audio demonstrace SPL">
               <p class="audio-demo-description">
-                Vyberte skladbu a spusťte ji. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
+                Spusťte výchozí demo nebo vyberte vlastní skladbu. Při přesouvání posluchače v půdorysu se hlasitost automaticky mění podle vypočteného SPL v daném místě.
               </p>
               <div class="floor-audio-tools">
-                <label class="audio-file-label audio-control-button" for="audioFileInput">Vybrat skladbu</label>
+                <label class="audio-file-label audio-control-button" for="audioFileInput">Vybrat vlastní skladbu</label>
                 <input id="audioFileInput" class="audio-file-input" type="file" accept="audio/*" />
-                <button id="audioPlayToggle" class="secondary-button small-button audio-play-button audio-control-button" type="button" disabled>Spustit</button>
-                <span id="audioGainStatus" class="audio-gain-status">Audio vypnuto</span>
-                <audio id="spatialAudio" preload="metadata"></audio>
+                <button id="audioPlayToggle" class="secondary-button small-button audio-play-button audio-control-button" type="button">Spustit demo</button>
+                <label class="audio-volume-control" for="audioVolume">
+                  <span>Hlasitost</span>
+                  <input id="audioVolume" class="audio-volume" type="range" min="0" max="100" value="100" step="1" aria-label="Hlasitost audio ukázky" />
+                </label>
+                <span id="audioGainStatus" class="audio-gain-status">Připraveno</span>
+                <audio id="spatialAudio" preload="metadata" src="assets/audio/default-demo.mp3"></audio>
               </div>
               <div class="audio-progress-row">
                 <span id="audioCurrentTime">0:00</span>
@@ -579,19 +587,18 @@
                 <tr>
                   <th>Produkt</th>
                   <th>Množství</th>
-                  <th>Kód</th>
                   <th>Cena / ks</th>
                   <th>Celkem</th>
                 </tr>
               </thead>
               <tbody id="priceSummaryBody">
                 <tr>
-                  <td colspan="5">—</td>
+                  <td colspan="4">—</td>
                 </tr>
               </tbody>
               <tfoot>
                 <tr>
-                  <th colspan="4">Celková cena vč. DPH</th>
+                  <th colspan="3">Celková cena vč. DPH</th>
                   <th id="priceGrandTotal">—</th>
                 </tr>
               </tfoot>
@@ -606,6 +613,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=0.140"></script>
+  <script src="app.js?v=0.142"></script>
 </body>
 </html>

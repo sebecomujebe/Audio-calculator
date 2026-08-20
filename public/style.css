@@ -2373,3 +2373,98 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text, #f4f7fb);
   font-weight: 700;
 }
+
+
+/* v0.141 – sjednocené oranžové akční prvky */
+.technical-details-hint,
+.coordinates-toggle-button,
+#copySpeakerCoordinates,
+.audio-control-button {
+  border-color: #ff7a1a !important;
+  background: #ff7a1a !important;
+  color: #101820 !important;
+  box-shadow: none !important;
+}
+
+.technical-details-hint:hover,
+.coordinates-toggle-button:hover,
+#copySpeakerCoordinates:hover,
+.audio-control-button:hover {
+  background: #ff8b35 !important;
+  border-color: #ff8b35 !important;
+}
+
+/* Určení doporučeného počtu má stejné formátování jako ostatní hodnoty. */
+#technicalToleranceGoalValue {
+  color: #edf2f7 !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  font-weight: 700 !important;
+}
+
+.audio-volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #aeb9c5;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.audio-volume {
+  width: 86px;
+  accent-color: #ff7a1a;
+}
+
+@media (max-width: 700px) {
+  .audio-volume-control { width: 100%; }
+  .audio-volume { flex: 1; }
+}
+
+
+/* v0.142 – produktové obrázky ve výsledku a cenové kalkulaci */
+.result-title-with-image {
+  align-items: center;
+  gap: 14px;
+}
+.result-speaker-image {
+  width: 78px;
+  height: 78px;
+  flex: 0 0 78px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+.result-title-text { min-width: 0; }
+.result-title-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.result-title-name-row h2 { margin: 0; }
+.price-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+}
+.price-product-image {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+}
+.price-table th:nth-child(3),
+.price-table td:nth-child(3),
+.price-table th:nth-child(4),
+.price-table td:nth-child(4) {
+  white-space: nowrap;
+  text-align: right;
+}
+@media (max-width: 620px) {
+  .result-speaker-image { width: 64px; height: 64px; flex-basis: 64px; }
+  .price-product-image { width: 48px; height: 48px; flex-basis: 48px; }
+}

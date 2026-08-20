@@ -1,4 +1,4 @@
-const APP_VERSION = "0.140";
+const APP_VERSION = "0.142";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -165,7 +165,8 @@ function applySpeakerSheet(rows) {
     freqHigh: numValue(r["Frekvence do [Hz]"]),
     impedance: r["Impedance"] || "",
     productNo: r["PRODUCTNO"] || "",
-    url: r["URL produktu"] || ""
+    url: r["URL produktu"] || "",
+    image: r["Obrázky"] || r["Obrazky"] || r["Obrázek"] || r["Obrazek"] || ""
   })).filter(s => s.active && s.model && s.sensitivity && s.coverageAngle);
   if (mapped.length >= 5) SPEAKERS = mapped;
 }
@@ -4942,6 +4943,7 @@ function updateHeatmapScaleLabels(heatmap) {
 
 let audioObjectUrl = null;
 const AUDIO_BASE_VOLUME = 0.32;
+let audioUserVolume = 1;
 
 function updateSpatialAudioGain(listenerSPL = null) {
   const audio = document.getElementById("spatialAudio");
@@ -4966,7 +4968,7 @@ function updateSpatialAudioGain(listenerSPL = null) {
 
   const deltaDb = currentSPL - referenceSPL;
   const relativeGain = Math.pow(10, deltaDb / 20);
-  audio.volume = Math.max(0.03, Math.min(1, AUDIO_BASE_VOLUME * relativeGain));
+  audio.volume = Math.max(0, Math.min(1, AUDIO_BASE_VOLUME * audioUserVolume * relativeGain));
 
   const signed = `${deltaDb >= 0 ? "+" : ""}${deltaDb.toFixed(1).replace(".", ",")} dB`;
   status.textContent = `${signed} vůči průměru`;
@@ -5045,6 +5047,22 @@ function drawFloorPlan({
       transform="rotate(-90 ${ox - 26} ${H/2})">${lengthM.toFixed(1)} m</text>
   `;
 
+  // Orientace pohledů/řezů podle os použitých ve spodních řezech.
+  const viewDirections = `
+    <g class="floor-view-direction" pointer-events="none">
+      <line x1="${ox}" y1="${Math.max(20, oy - 22)}" x2="${Math.min(W - 18, ox + 118)}" y2="${Math.max(20, oy - 22)}"
+        stroke="#ff7a1a" stroke-width="1.5"/>
+      <path d="M ${Math.min(W - 18, ox + 118)} ${Math.max(20, oy - 22)} l -8 -4 l 0 8 z" fill="#ff7a1a"/>
+      <text x="${ox}" y="${Math.max(12, oy - 30)}" fill="#ff9a4d" font-size="10" font-weight="700">A–A Boční řez</text>
+
+      <line x1="${Math.min(W - 26, ox + roomW + 24)}" y1="${oy + roomH}" x2="${Math.min(W - 26, ox + roomW + 24)}" y2="${Math.max(18, oy + roomH - 118)}"
+        stroke="#ff7a1a" stroke-width="1.5"/>
+      <path d="M ${Math.min(W - 26, ox + roomW + 24)} ${Math.max(18, oy + roomH - 118)} l -4 8 l 8 0 z" fill="#ff7a1a"/>
+      <text x="${Math.min(W - 18, ox + roomW + 32)}" y="${oy + roomH - 4}" fill="#ff9a4d" font-size="10" font-weight="700"
+        transform="rotate(-90 ${Math.min(W - 18, ox + roomW + 32)} ${oy + roomH - 4})">B–B Čelní řez</text>
+    </g>
+  `;
+
   const cellW = roomW / heatmap.nx;
   const cellH = roomH / heatmap.ny;
   const heatCells = heatmap.cells.map(c => {
@@ -5107,7 +5125,7 @@ const color = heatColor(c.spl, heatmap.min, heatmap.max);
     </g>
   `;
 
-  svg.innerHTML = floorDefs + rect + `<g clip-path="url(#${floorClipId})">${heatCells}</g>` + dims + circles + listener;
+  svg.innerHTML = floorDefs + rect + `<g clip-path="url(#${floorClipId})">${heatCells}</g>` + dims + viewDirections + circles + listener;
   updateHeatmapScaleLabels(heatmap);
 
   appState.latest = {
@@ -5777,6 +5795,34 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+function getSpeakerProductImageSrc(speaker) {
+  if (!speaker) return "";
+  let raw = String(speaker.image || "").trim();
+  // Pokud feed obrázek neuvádí, použijeme jako bezpečný fallback model.
+  if (!raw) raw = String(speaker.model || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")) return raw;
+  if (raw.startsWith("assets/")) return raw;
+  if (!/\.[a-z0-9]{2,5}$/i.test(raw)) raw += ".webp";
+  return `assets/products/${raw}`;
+}
+
+function renderSpeakerProductImage(speaker) {
+  const img = document.getElementById("resultSpeakerImage");
+  if (!img) return;
+  const src = getSpeakerProductImageSrc(speaker);
+  if (!src) {
+    img.hidden = true;
+    img.removeAttribute("src");
+    return;
+  }
+  img.hidden = false;
+  img.alt = speaker?.model ? `Obrázek ${speaker.model}` : "Obrázek reproduktoru";
+  img.onerror = () => { img.hidden = true; };
+  img.onload = () => { img.hidden = false; };
+  img.src = src;
+}
 function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
   const body = document.getElementById("priceSummaryBody");
   const totalEl = document.getElementById("priceGrandTotal");
@@ -5789,7 +5835,7 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
   rows.push({
     name: `${speaker.manufacturer || ""} ${speaker.model}`.trim(),
     qty: speakerCount,
-    code: speaker.avCode || "",
+    imageSrc: getSpeakerProductImageSrc(speaker),
     priceItem: getPriceByAvCode(speaker.avCode)
   });
 
@@ -5798,7 +5844,7 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
     rows.push({
       name: `${a.manufacturer || ""} ${a.model}`.trim(),
       qty: amplifierRecommendation.ampCount || 1,
-      code: a.avCode || "",
+      imageSrc: "",
       priceItem: getPriceByAvCode(a.avCode)
     });
   }
@@ -5814,13 +5860,17 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
 
     return `
       <tr>
-        <td>${
-          getPriceItemUrl(row.priceItem)
-            ? `<a class="price-product-link" href="${escapeHtml(getPriceItemUrl(row.priceItem))}" target="_blank" rel="noopener noreferrer" title="Otevřít produkt na AV Integra">${escapeHtml(row.name)}</a>`
-            : escapeHtml(row.name)
-        }</td>
+        <td>
+          <div class="price-product-cell">
+            ${row.imageSrc ? `<img class="price-product-image" src="${escapeHtml(row.imageSrc)}" alt="" onerror="this.style.display='none'">` : ""}
+            <span>${
+              getPriceItemUrl(row.priceItem)
+                ? `<a class="price-product-link" href="${escapeHtml(getPriceItemUrl(row.priceItem))}" target="_blank" rel="noopener noreferrer" title="Otevřít produkt na AV Integra">${escapeHtml(row.name)}</a>`
+                : escapeHtml(row.name)
+            }</span>
+          </div>
+        </td>
         <td>${row.qty}×</td>
-        <td>${escapeHtml(row.code || "—")}</td>
         <td>${formatCzk(price)}</td>
         <td>${formatCzk(subtotal)}</td>
       </tr>
@@ -5833,7 +5883,7 @@ function updatePriceSummary({speaker, speakerCount, amplifierRecommendation}) {
     statusEl.textContent = complete ? "Ceny načteny" : "Ceny částečně dostupné";
     noteEl.textContent = complete
       ? `Ceny jsou uvedeny včetně DPH${PRICE_DATA_UPDATED_AT ? ` • aktualizace ${PRICE_DATA_UPDATED_AT}` : ""}.`
-      : "U některých položek chybí cena nebo kód produktu; celková cena proto není zobrazena.";
+      : "U některých položek chybí cena; celková cena proto není zobrazena.";
   } else {
     statusEl.textContent = PRICE_DATA_LOAD_STATE === "unavailable"
       ? "Cenový feed zatím není připojen"
@@ -6334,6 +6384,7 @@ function calculate() {
   });
 
   document.getElementById("resultTitle").textContent = speaker.model;
+  renderSpeakerProductImage(speaker);
   updateSuitabilityUI(suitability);
   document.getElementById("speakerCount").textContent = `${effectiveCoverage.count} ks`;
   const floorSpeakerCount = document.getElementById("floorSpeakerCount");
@@ -6632,6 +6683,7 @@ const audioGainStatus = document.getElementById("audioGainStatus");
 const audioSeek = document.getElementById("audioSeek");
 const audioCurrentTime = document.getElementById("audioCurrentTime");
 const audioDuration = document.getElementById("audioDuration");
+const audioVolume = document.getElementById("audioVolume");
 
 function formatAudioTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -6654,7 +6706,7 @@ function updateAudioProgress() {
 
 function updateAudioPlayButton() {
   if (!audioPlayToggle || !spatialAudio) return;
-  audioPlayToggle.textContent = spatialAudio.paused ? "Spustit" : "Pozastavit";
+  audioPlayToggle.textContent = spatialAudio.paused ? "Spustit demo" : "Pozastavit";
 }
 
 audioFileInput?.addEventListener("change", () => {
@@ -6674,6 +6726,17 @@ audioFileInput?.addEventListener("change", () => {
   if (audioGainStatus) audioGainStatus.textContent = "Připraveno";
   updateSpatialAudioGain();
 });
+
+audioVolume?.addEventListener("input", () => {
+  audioUserVolume = Math.max(0, Math.min(1, Number(audioVolume.value) / 100));
+  updateSpatialAudioGain();
+});
+
+// Výchozí demo je připravené ihned po načtení stránky.
+if (spatialAudio) {
+  spatialAudio.load();
+  updateSpatialAudioGain();
+}
 
 audioPlayToggle?.addEventListener("click", async () => {
   if (!spatialAudio?.src) return;
