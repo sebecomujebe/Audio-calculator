@@ -1,4 +1,4 @@
-const APP_VERSION = "0.143";
+const APP_VERSION = "0.145";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -4059,33 +4059,122 @@ function evaluateRectangleAgainstSscReference(room, placements, coverage, speake
   return {passes:minRatio>=0.995, overallRatio:minRatio, reference};
 }
 
+function rectangleOptimizedHardGeometryCheck(room, placements, coverage) {
+  if (!placements?.length || room.shape !== "rectangle") {
+    return {passes:false, maxNearestM:Infinity, maxBoundaryNearestM:Infinity};
+  }
+
+  const spacingXM = Math.max(0.05, coverage.spacingX / FEET_PER_METER);
+  const spacingYM = Math.max(0.05, coverage.spacingY / FEET_PER_METER);
+  const maxSscNeighborM = Math.max(spacingXM, spacingYM);
+  // Roh referenční SSC buňky: repro je půl rozteče od obou stěn.
+  const maxSscBoundaryM = Math.hypot(spacingXM / 2, spacingYM / 2);
+  const tolerance = 1.01;
+
+  const pts = placements.map(p => ({x:p.x/FEET_PER_METER, y:p.y/FEET_PER_METER}));
+
+  // Žádný reproduktor nesmí být "opuštěný" dál než dovoluje skutečná SSC rozteč.
+  let maxNearestM = 0;
+  if (pts.length > 1) {
+    for (let i=0; i<pts.length; i++) {
+      let nearest = Infinity;
+      for (let j=0; j<pts.length; j++) {
+        if (i === j) continue;
+        nearest = Math.min(nearest, Math.hypot(pts[i].x-pts[j].x, pts[i].y-pts[j].y));
+      }
+      maxNearestM = Math.max(maxNearestM, nearest);
+      if (nearest > maxSscNeighborM * tolerance) {
+        return {passes:false, maxNearestM, maxBoundaryNearestM:Infinity, maxSscNeighborM, maxSscBoundaryM};
+      }
+    }
+  }
+
+  // Samostatná tvrdá kontrola kraje: žádný bod obvodu nesmí být dál od
+  // nejbližšího repro než roh původní SSC mřížky.
+  let maxBoundaryNearestM = 0;
+  const samplesPerEdge = 72;
+  const boundaryPoints = [];
+  for (let i=0; i<=samplesPerEdge; i++) {
+    const t = i / samplesPerEdge;
+    boundaryPoints.push(
+      {x:room.widthM*t, y:0},
+      {x:room.widthM*t, y:room.lengthM},
+      {x:0, y:room.lengthM*t},
+      {x:room.widthM, y:room.lengthM*t}
+    );
+  }
+  for (const q of boundaryPoints) {
+    let nearest = Infinity;
+    for (const p of pts) nearest = Math.min(nearest, Math.hypot(q.x-p.x, q.y-p.y));
+    maxBoundaryNearestM = Math.max(maxBoundaryNearestM, nearest);
+    if (nearest > maxSscBoundaryM * tolerance) {
+      return {passes:false, maxNearestM, maxBoundaryNearestM, maxSscNeighborM, maxSscBoundaryM};
+    }
+  }
+
+  return {passes:true, maxNearestM, maxBoundaryNearestM, maxSscNeighborM, maxSscBoundaryM};
+}
+
 function chooseRectangleOptimizedDesign(room, coverage, speaker) {
   if (room.shape !== "rectangle") return null;
-  const maxCount = Math.max(coverage.count + 4, 8);
 
-  for (let count=1; count<=maxCount; count++) {
+  // Bezpečný základ je vždy původní SSC mřížka. Optimalizovaná varianta smí
+  // pouze UBRAT repro; pokud bezpečnější úspora neexistuje, vrátíme SSC beze změny.
+  const sscPlacements = calculatePlacements(coverage, room);
+  const sscBaseline = {
+    placements:sscPlacements.map(p => ({...p})),
+    count:sscPlacements.length,
+    method:`Původní SSC mřížka ${coverage.columns} × ${coverage.rows}`,
+    source:"rectangle-ssc-baseline",
+    alignmentWeight:4,
+    isStructuredLattice:true,
+    clearanceM:recommendedWallClearanceMeters(coverage, room)
+  };
+
+  const baselineBenchmark = evaluateRectangleAgainstSscReference(room, sscBaseline.placements, coverage, speaker);
+  sscBaseline.sscBenchmark = baselineBenchmark;
+  sscBaseline.hardGeometry = rectangleOptimizedHardGeometryCheck(room, sscBaseline.placements, coverage);
+
+  // Hledáme pouze menší počet než má SSC. Kandidáty tvoří pravoúhlé a
+  // posunuté/hex mřížky (typicky např. řady 4–3–4), nikoli volné body.
+  for (let count=1; count<sscBaseline.count; count++) {
     const candidates = buildLayoutCandidates(count, coverage, room, "balanced", "full")
-      .filter(c => c?.isStructuredLattice !== false && c?.placements?.length === count);
+      .filter(c => c?.isStructuredLattice !== false && c?.placements?.length === count)
+      // Pro obdélník dovolujeme jen osově orientované mřížky; žádné šikmé 30/45/60° varianty.
+      .filter(c => Math.abs(Number(c.latticeAngleDeg || 0)) < 0.01);
+
     const passing = [];
     for (const candidate of candidates) {
-      const benchmark = evaluateRectangleAgainstSscReference(room,candidate.placements,coverage,speaker);
+      const hardGeometry = rectangleOptimizedHardGeometryCheck(room, candidate.placements, coverage);
+      if (!hardGeometry.passes) continue;
+
+      const benchmark = evaluateRectangleAgainstSscReference(room, candidate.placements, coverage, speaker);
       if (!benchmark.passes) continue;
-      passing.push({...candidate, count, sscBenchmark:benchmark});
+
+      passing.push({...candidate, count, sscBenchmark:benchmark, hardGeometry});
     }
+
     if (passing.length) {
       passing.sort((a,b) =>
         (b.sscBenchmark?.overallRatio||0) - (a.sscBenchmark?.overallRatio||0) ||
+        (a.hardGeometry?.maxBoundaryNearestM||Infinity) - (b.hardGeometry?.maxBoundaryNearestM||Infinity) ||
         (b.alignmentWeight||0) - (a.alignmentWeight||0)
       );
       const best = passing[0];
       return {
         ...best,
-        method:`Optimalizovaná ${best.method || "mřížka"} • SSC benchmark`,
+        method:`Optimalizovaná ${best.method || "mřížka"} • max. rozteče SSC`,
         source:"rectangle-ssc-optimized"
       };
     }
   }
-  return null;
+
+  // Optimalizace nikdy nesmí vyjít hůř než klasická mřížka.
+  return {
+    ...sscBaseline,
+    method:`Optimalizovaná • bez bezpečné úspory, použita ${sscBaseline.method}`,
+    source:"rectangle-ssc-optimized-fallback"
+  };
 }
 
 function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned", acousticContext = null) {
@@ -5264,10 +5353,16 @@ function drawSectionView({
   // 1 metr vodorovně = 1 metr svisle.
   // Šířka grafu zůstává stejná, dynamická je pouze výška.
   const usableW = W - padX * 2;
+  // Vodorovná osa zůstává vždy přes celou šířku. Do výšky držíme fyzické
+  // měřítko 1:1 jen do 5 m; vyšší místnosti už graf dál nezvětšují.
   const pxPerMeter = usableW / Math.max(0.1, axisLengthM);
+  const maxPhysicalHeightM = 5;
 
   const roomW = usableW;
-  const roomH = Math.max(120, heightM * pxPerMeter);
+  const naturalRoomH = heightM * pxPerMeter;
+  const maxRoomH = maxPhysicalHeightM * pxPerMeter;
+  const roomH = Math.max(120, Math.min(naturalRoomH, maxRoomH));
+  const pxPerMeterY = roomH / Math.max(0.1, heightM);
   const H = padTop + roomH + padBottom;
 
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -5280,8 +5375,8 @@ function drawSectionView({
 
   const mountHeightM = mountingHeightFt / FEET_PER_METER;
   const listenerHeightM = listenerHeightFt / FEET_PER_METER;
-  const speakerY = floorY - mountHeightM * pxPerMeter;
-  const earY = floorY - listenerHeightM * pxPerMeter;
+  const speakerY = floorY - mountHeightM * pxPerMeterY;
+  const earY = floorY - listenerHeightM * pxPerMeterY;
 
   const halfAngleRad = Math.max(1, Math.min(179, speaker.coverageAngle)) * Math.PI / 360;
   const verticalDistanceToEarM = Math.max(0.05, mountHeightM - listenerHeightM);
@@ -5410,21 +5505,30 @@ function drawSectionView({
     const strongestInfluence = group.items.some(item => item.influence === "strong")
       ? "strong"
       : group.items.some(item => item.influence === "medium") ? "medium" : "low";
-    const baseFill = strongestInfluence === "strong" ? "#ffd9bd"
-      : strongestInfluence === "medium" ? "#c9a78e" : "#8e98a5";
-    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.78 : 0.55;
-    const labelY = Math.max(17, speakerY - 13);
-    const parts = orderedItems.map((item, idx) => {
+    const opacity = strongestInfluence === "strong" ? 1 : strongestInfluence === "medium" ? 0.82 : 0.58;
+    const labelY = Math.max(18, speakerY - 17);
+    const chipW = 24;
+    const chipH = 21;
+    const chipGap = 3;
+    const totalW = orderedItems.length * chipW + Math.max(0, orderedItems.length - 1) * chipGap;
+    const startX = group.cx - totalW / 2;
+
+    const chips = orderedItems.map((item, idx) => {
       const isNearest = nearest && item.index === nearest.index;
-      const separator = idx ? `<tspan fill="${baseFill}" font-weight="700">, </tspan>` : "";
-      const number = isNearest
-        ? `<tspan fill="#ff8b35" font-size="14.5" font-weight="900">${item.index + 1}</tspan>`
-        : `<tspan fill="${baseFill}" font-size="12.5" font-weight="750">${item.index + 1}</tspan>`;
-      return separator + number;
+      const x = startX + idx * (chipW + chipGap);
+      const fill = isNearest ? "#ff7a1a" : "#17212b";
+      const stroke = isNearest ? "#ffd5b8" : "#596573";
+      const textFill = isNearest ? "#101820" : "#e1e7ee";
+      return `
+        <g opacity="${isNearest ? 1 : opacity}">
+          <rect x="${x}" y="${labelY-chipH+4}" width="${chipW}" height="${chipH}" rx="6"
+            fill="${fill}" stroke="${stroke}" stroke-width="${isNearest ? 1.6 : 1}"/>
+          <text x="${x+chipW/2}" y="${labelY}" text-anchor="middle"
+            fill="${textFill}" font-size="${isNearest ? 14 : 13}" font-weight="${isNearest ? 900 : 800}">${item.index + 1}</text>
+        </g>`;
     }).join("");
-    return `<text x="${group.cx}" y="${labelY}" text-anchor="middle"
-      opacity="${opacity}" font-size="12.5" font-weight="750"
-      paint-order="stroke" stroke="#0d131a" stroke-width="3.2" stroke-linejoin="round">${parts}</text>`;
+
+    return `<g class="section-speaker-number-group">${chips}</g>`;
   }).join("");
 
   const listenerCx = ox + listenerAxisM * pxPerMeter;
@@ -5476,6 +5580,7 @@ function drawSectionView({
     roomW,
     roomH,
     pxPerMeter,
+    pxPerMeterY,
     axisLengthM,
     floorY,
     earY
