@@ -6412,7 +6412,10 @@ function updateAmplifierUI(result) {
     model.textContent = "Nenalezen vhodný model";
     capacity.textContent = "—";
     utilization.textContent = "—";
-    detail.textContent = "V databázi není aktivní zesilovač, který splní požadovaný výkon a limity rozdělení zóny.";
+    if (detail) {
+      detail.hidden = false;
+      detail.textContent = "V databázi není aktivní zesilovač, který splní požadovaný výkon a limity rozdělení zóny.";
+    }
     if (zoneOutputs) zoneOutputs.textContent = "—";
     if (perOutput) perOutput.textContent = "—";
     if (dsp) dsp.textContent = "—";
@@ -6424,12 +6427,11 @@ function updateAmplifierUI(result) {
   model.textContent = `${result.ampCount > 1 ? result.ampCount + "× " : ""}${result.amp.model}`;
   capacity.textContent = `${result.totalCapacity.toFixed(0)} W`;
   utilization.textContent = `${result.utilization.toFixed(0)} %`;
-  const danteText = result.amp.hasDante ? "Dante" : "bez Dante";
-  const dspText = result.amp.hasDSP ? "DSP" : "bez DSP";
-  detail.textContent =
-    `${result.splitsNeeded} výkonový${result.splitsNeeded === 1 ? "" : "é"} výstup${result.splitsNeeded === 1 ? "" : "y"} pro zónu; ` +
-    `${result.amp.powerPerZone.toFixed(0)} W na výstup; ${dspText}, ${danteText}.`;
-  if (zoneOutputs) zoneOutputs.textContent = `${Math.max(1, result.amp.effectiveZones || result.splitsNeeded || 1)}`;
+  if (detail) {
+    detail.hidden = true;
+    detail.textContent = "";
+  }
+  if (zoneOutputs) zoneOutputs.textContent = `${Math.max(1, result.splitsNeeded || 1)}`;
   if (perOutput) perOutput.textContent = `${result.amp.powerPerZone.toFixed(0)} W`;
   if (dsp) dsp.textContent = result.amp.hasDSP ? "Ano" : "Ne";
   if (dante) dante.textContent = result.amp.hasDante ? "Ano" : "Ne";

@@ -2735,3 +2735,65 @@ input[type="number"]::-webkit-outer-spin-button {
     height: 96px;
   }
 }
+
+
+/* v0.151 – přehlednější karta zesilovače a větší produktový obrázek */
+.amplifier-panel .amp-result-main{
+  grid-template-columns:minmax(0,1fr) minmax(420px,600px);
+  gap:34px;
+  align-items:center;
+}
+.amplifier-product-image-slot{
+  height:180px;
+  max-width:600px;
+  justify-self:end;
+}
+.amplifier-product-image-slot img{
+  object-fit:contain;
+  object-position:center;
+}
+.amplifier-detail-note[hidden]{display:none!important;}
+.amp-product-specs{
+  margin-top:16px;
+  max-width:680px;
+}
+@media(max-width:1050px){
+  .amplifier-panel .amp-result-main{
+    grid-template-columns:minmax(0,1fr) minmax(320px,460px);
+    gap:24px;
+  }
+  .amplifier-product-image-slot{height:150px;}
+}
+@media(max-width:850px){
+  .amplifier-panel .amp-result-main{grid-template-columns:1fr;gap:16px;}
+  .amplifier-product-image-slot{width:min(100%,600px);height:140px;justify-self:start;}
+}
+
+/* v0.152 – stabilní zarovnání hlavičky karty reproduktorů */
+.speaker-result-header-v2 {
+  align-items: start;
+}
+.speaker-result-info {
+  align-self: start;
+  padding-top: 0;
+}
+.speaker-result-hero-image-wrap {
+  align-self: start;
+  height: 118px;
+  min-height: 118px;
+}
+.result-controls-vertical {
+  align-self: start;
+}
+@media (max-width: 980px) {
+  .speaker-result-hero-image-wrap {
+    height: 104px;
+    min-height: 104px;
+  }
+}
+@media (max-width: 760px) {
+  .speaker-result-hero-image-wrap {
+    height: 96px;
+    min-height: 96px;
+  }
+}
