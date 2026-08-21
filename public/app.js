@@ -1,4 +1,4 @@
-const APP_VERSION = "0.148";
+const APP_VERSION = "0.153";
 const FEET_PER_METER = 3.28084;
 const SPL_REFERENCE_DISTANCE_FT = 3.28084;
 const MIN_LISTENER_DISTANCE_FT = 0.5;
@@ -408,7 +408,7 @@ function calculateCoverage({
 
   const listenerDistance = Math.max(MIN_LISTENER_DISTANCE_FT, rawDistance);
 
-  // SSC: coverage diameter = 2 * tan(angle/2) * listener distance
+  // Průměr pokrytí = 2 × tan(úhel/2) × svislá vzdálenost k posluchači
   const coverageDiameter = Math.round(
     Math.tan((coverageAngle * Math.PI / 180) / 2) * listenerDistance * 200
   ) / 100;
@@ -727,7 +727,7 @@ function updatePlacementOptimizationAvailability() {
   let preferred = previous;
 
   if (shape === "rectangle") {
-    // Obdélník používá výhradně referenční SSC mřížku. Volba rozmístění
+    // Obdélník používá výhradně referenční pravidelnou mřížku. Volba rozmístění
     // se v UI skryje; kruh a speciální tvar si své volby ponechávají.
     options = [
       {value:"regular", label:"Mřížka"}
@@ -2912,7 +2912,7 @@ function buildCircleRingSpec(room, targetSpacingM, centerSpeaker) {
   }
 
   // Rozdělíme poloměr tak, aby radiální rozteč nikdy nebyla větší než
-  // rozteč referenční SSC mřížky a poslední prstenec zůstal cca S/2 od stěny.
+  // rozteč referenční pravidelné mřížky a poslední prstenec zůstal cca S/2 od stěny.
   const ringCount = Math.max(1, Math.ceil(outerRadiusM / targetSpacingM));
   const radialPitchM = outerRadiusM / ringCount;
   const radiiM = [];
@@ -2974,7 +2974,7 @@ function circleGeometryContribution(horizontalDistanceM, verticalDistanceM, cove
   return directivityLinear / distanceSqM;
 }
 
-function buildSscCircleGeometryReference(coverage, speaker) {
+function buildCoverageGeometryReference(coverage, speaker) {
   const spacingXM = Math.max(0.05, coverage.spacingX / FEET_PER_METER);
   const spacingYM = Math.max(0.05, coverage.spacingY / FEET_PER_METER);
   const verticalDistanceM = Math.max(
@@ -3012,7 +3012,7 @@ function circleTopContributionsAtPoint(xM, yM, placementsM, reference, speaker, 
   return values.slice(0, topN);
 }
 
-function evaluateCircleAgainstSscReference(
+function evaluateCircleAgainstCoverageReference(
   room,
   placements,
   coverage,
@@ -3029,7 +3029,7 @@ function evaluateCircleAgainstSscReference(
     };
   }
 
-  const reference = buildSscCircleGeometryReference(coverage, speaker);
+  const reference = buildCoverageGeometryReference(coverage, speaker);
   const R = room.diameterM / 2;
   const cx = R;
   const cy = R;
@@ -3041,7 +3041,7 @@ function evaluateCircleAgainstSscReference(
   const boundarySamples = sampleQuality === "fast" ? 360 : 1080;
   let minBoundaryRatio = Infinity;
 
-  // Okraj: srovnáváme s nejhorším rohem SSC, kde uvažujeme jeden
+  // Okraj: srovnáváme s nejhorším rohem referenční mřížka, kde uvažujeme jeden
   // nejbližší reproduktor v diagonální vzdálenosti půl buňky X/Y.
   for (let i = 0; i < boundarySamples; i++) {
     const a = (i + 0.5) * 2 * Math.PI / boundarySamples;
@@ -3061,7 +3061,7 @@ function evaluateCircleAgainstSscReference(
   let minTransitionRatio = Infinity;
 
   // Plocha: uvnitř porovnáváme čtyři nejsilnější geometrické příspěvky
-  // se středem referenční SSC buňky (4 repro). V pásmu u stěny plynule
+  // se středem referenční buňky (4 repro). V pásmu u stěny plynule
   // přecházíme od okrajové reference k vnitřní, aby nezůstala nekontrolovaná
   // mezera mezi obvodem a čistým interiérem.
   for (let ir = 0; ir < radialSamples; ir++) {
@@ -3109,7 +3109,7 @@ function evaluateCircleAgainstSscReference(
     minTransitionRatio
   );
 
-  // Pouze numerická tolerance vzorkování. Návrhově požadujeme 100 % SSC reference.
+  // Pouze numerická tolerance vzorkování. Návrhově požadujeme 100 % referenční geometrie.
   const passThreshold = 0.995;
 
   return {
@@ -3122,14 +3122,14 @@ function evaluateCircleAgainstSscReference(
   };
 }
 
-function optimizeCircleRingSpecAgainstSsc(room, spec, coverage, speaker) {
+function optimizeCircleRingSpecAgainstReference(room, spec, coverage, speaker) {
   let currentSpec = {
     centerSpeaker:Boolean(spec.centerSpeaker),
     radiiM:spec.radiiM.slice(),
     counts:spec.counts.slice()
   };
   let currentPlacements = materializeCircleRingSpec(room, currentSpec);
-  let currentBenchmark = evaluateCircleAgainstSscReference(
+  let currentBenchmark = evaluateCircleAgainstCoverageReference(
     room,currentPlacements,coverage,speaker,"full"
   );
 
@@ -3160,7 +3160,7 @@ function optimizeCircleRingSpecAgainstSsc(room, spec, coverage, speaker) {
     }
 
     // Zkusíme i odebrat celý vnitřní prstenec. Pokud geometrie stále projde,
-    // může to u některých rozměrů ušetřit několik kusů bez zhoršení vůči SSC.
+    // může to u některých rozměrů ušetřit několik kusů bez zhoršení vůči referenční geometrii.
     if (currentSpec.radiiM.length > 1) {
       proposals.push({
         centerSpeaker:currentSpec.centerSpeaker,
@@ -3172,7 +3172,7 @@ function optimizeCircleRingSpecAgainstSsc(room, spec, coverage, speaker) {
     let best = null;
     for (const proposal of proposals) {
       const placements = materializeCircleRingSpec(room, proposal);
-      const benchmark = evaluateCircleAgainstSscReference(
+      const benchmark = evaluateCircleAgainstCoverageReference(
         room,placements,coverage,speaker,"full"
       );
       if (!benchmark.passes) continue;
@@ -3249,9 +3249,9 @@ function generateCircleRowFamily(room, targetSpacingM, angleDeg) {
 }
 
 function buildCircleCoverageDesignCandidates(room, coverage, speaker) {
-  // v0.133: SSC fitted spacing is the reference geometry. Circular layouts may
+  // v0.133: referenční vypočtená rozteč is the referenční geometrie. Circular layouts may
   // use fewer speakers only if every sampled point remains at least as good
-  // as the corresponding SSC interior/edge reference.
+  // as the corresponding referenční interior/edge reference.
   const targetSpacingM = Math.max(
     0.15,
     Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER
@@ -3261,7 +3261,7 @@ function buildCircleCoverageDesignCandidates(room, coverage, speaker) {
 
   for (const centerSpeaker of [true,false]) {
     const baseSpec = buildCircleRingSpec(room, targetSpacingM, centerSpeaker);
-    const optimized = optimizeCircleRingSpecAgainstSsc(
+    const optimized = optimizeCircleRingSpecAgainstReference(
       room,baseSpec,coverage,speaker
     );
     if (!optimized?.placements?.length) continue;
@@ -3269,13 +3269,13 @@ function buildCircleCoverageDesignCandidates(room, coverage, speaker) {
     const benchmark = optimized.benchmark;
     candidates.push({
       method:centerSpeaker
-        ? "Kruhové prstence • SSC benchmark"
-        : "Kruhové prstence bez středu • SSC benchmark",
+        ? "Kruhové prstence • referenční geometrie"
+        : "Kruhové prstence bez středu • referenční geometrie",
       family:centerSpeaker ? "rings-center" : "rings-no-center",
       placements:optimized.placements,
       ringSpec:optimized.spec,
       count:optimized.placements.length,
-      sscBenchmark:benchmark,
+      geometryBenchmark:benchmark,
       designCoveragePct:circleDesignCoveragePct(
         room,optimized.placements,coverage
       ),
@@ -3732,7 +3732,7 @@ function generateCenteredHexCluster(room, spacingM, shellCount, rotationDeg = 0)
 
 function circleCandidateFromPlacements(room, coverage, speaker, placements, family, method, spacingM) {
   if (!placements?.length) return null;
-  const benchmark = evaluateCircleAgainstSscReference(room, placements, coverage, speaker, "full");
+  const benchmark = evaluateCircleAgainstCoverageReference(room, placements, coverage, speaker, "full");
   if (!benchmark.passes) return null;
   return {
     placements,
@@ -3745,10 +3745,10 @@ function circleCandidateFromPlacements(room, coverage, speaker, placements, fami
     clearanceM: recommendedWallClearanceMeters(coverage, room),
     isStructuredLattice: true,
     score: 0,
-    source: "ssc-geometry-benchmark",
+    source: "coverage-geometry-benchmark",
     radialScale: 1,
     removedSymmetricCount: 0,
-    sscBenchmark: benchmark
+    geometryBenchmark: benchmark
   };
 }
 
@@ -3756,7 +3756,7 @@ function buildAlignedCircleCandidates(room, coverage, speaker) {
   const candidates = [];
   const spacingM = Math.max(0.15, Math.min(coverage.spacingX, coverage.spacingY) / FEET_PER_METER);
 
-  // 1) Pure orthogonal SSC grid. Density is increased only within this family.
+  // 1) Čistá pravoúhlá referenční mřížka. Zahuštění probíhá pouze v rámci této rodiny.
   for (let extra = 0; extra <= 6; extra++) {
     const candidateCoverage = buildCircleAlignedCoverageForGrid(
       room, coverage, coverage.columns + extra, coverage.rows + extra
@@ -3765,8 +3765,8 @@ function buildAlignedCircleCandidates(room, coverage, speaker) {
     const c = circleCandidateFromPlacements(
       room, coverage, speaker, placements, "aligned-square",
       extra === 0
-        ? `Pevná SSC mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem`
-        : `Pevná mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem • zahuštěno pro SSC okraj`,
+        ? `Pevná pravidelná mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem`
+        : `Pevná mřížka ${candidateCoverage.columns} × ${candidateCoverage.rows} oříznutá kruhem • zahuštěno pro referenční okraj`,
       Math.min(candidateCoverage.spacingX, candidateCoverage.spacingY) / FEET_PER_METER
     );
     if (c) {
@@ -3787,7 +3787,7 @@ function buildAlignedCircleCandidates(room, coverage, speaker) {
         const placements = generateCircleStaggeredGrid(room, s, angle, px, py);
         const c = circleCandidateFromPlacements(
           room, coverage, speaker, placements, "aligned-hex",
-          `Posunutá hex mřížka • ${angle}° • SSC benchmark`, s
+          `Posunutá hex mřížka • ${angle}° • referenční geometrie`, s
         );
         if (c) {
           candidates.push(c);
@@ -3831,12 +3831,12 @@ function bestRegularCirclePattern(room, coverage, speaker, ringCount, centerSpea
     const placements = generateRegularCirclePattern(room, 0, 0, true, 0);
     return circleCandidateFromPlacements(
       room, coverage, speaker, placements, "circular-center",
-      "1 repro ve středu • SSC benchmark", spacingM
+      "1 repro ve středu • referenční geometrie", spacingM
     );
   }
 
   // Poloměr není odhadnutý z počtu kusů. Pro každé N ho samostatně hledáme,
-  // aby nejmenší konfigurace měla nejlepší možnou šanci splnit SSC referenci.
+  // aby nejmenší konfigurace měla nejlepší možnou šanci splnit referenční geometrii.
   const phases = ringCount <= 2 ? [0, Math.PI / 2] : [0, Math.PI / ringCount];
   const coarseSteps = 120;
   let best = null;
@@ -3846,7 +3846,7 @@ function bestRegularCirclePattern(room, coverage, speaker, ringCount, centerSpea
     const placements = generateRegularCirclePattern(
       room, ringCount, radiusM, centerSpeaker, phaseRad
     );
-    const benchmark = evaluateCircleAgainstSscReference(
+    const benchmark = evaluateCircleAgainstCoverageReference(
       room, placements, coverage, speaker, "full"
     );
     const option = {
@@ -3891,7 +3891,7 @@ function bestRegularCirclePattern(room, coverage, speaker, ringCount, centerSpea
   return {
     placements: best.placements,
     count: best.placements.length,
-    method: `${label} • optimalizovaný poloměr ${best.radiusM.toFixed(2)} m • SSC benchmark`,
+    method: `${label} • optimalizovaný poloměr ${best.radiusM.toFixed(2)} m • referenční geometrie`,
     family: centerSpeaker ? "circular-center-ring" : "circular-single-ring",
     ringRadiusM: best.radiusM,
     designCoveragePct: circleDesignCoveragePct(room, best.placements, coverage),
@@ -3900,10 +3900,10 @@ function bestRegularCirclePattern(room, coverage, speaker, ringCount, centerSpea
     clearanceM: recommendedWallClearanceMeters(coverage, room),
     isStructuredLattice: true,
     score: 0,
-    source: "ssc-geometry-benchmark",
+    source: "coverage-geometry-benchmark",
     radialScale: 1,
     removedSymmetricCount: 0,
-    sscBenchmark: best.benchmark
+    geometryBenchmark: best.benchmark
   };
 }
 
@@ -3917,7 +3917,7 @@ function bestCenteredHexShell(room, coverage, speaker, shellCount) {
   let best = null;
 
   // Kompletní plástvová vrstva: 1, 7, 19, 37... bodů.
-  // Pitch hledáme od kompaktní po referenční SSC rozteč; nepřekračujeme SSC spacing.
+  // Rozteč hledáme od kompaktní hodnoty po referenční maximum; referenční rozteč nepřekračujeme.
   for (let step = 0; step <= 48; step++) {
     const factor = 0.45 + (0.55 * step / 48);
     const pitchM = referenceSpacingM * factor;
@@ -3927,7 +3927,7 @@ function bestCenteredHexShell(room, coverage, speaker, shellCount) {
       // Chceme skutečně kompletní hex/plástev, nikoli kruhem oříznutou mřížku.
       if (placements.length !== expectedCount) continue;
 
-      const benchmark = evaluateCircleAgainstSscReference(
+      const benchmark = evaluateCircleAgainstCoverageReference(
         room, placements, coverage, speaker, "full"
       );
       const option = {placements, benchmark, pitchM, rotation, count:placements.length};
@@ -3947,7 +3947,7 @@ function bestCenteredHexShell(room, coverage, speaker, shellCount) {
   return {
     placements: best.placements,
     count: best.count,
-    method: `Plástvová hex struktura • ${best.count} ks • rozteč ${best.pitchM.toFixed(2)} m • SSC benchmark`,
+    method: `Plástvová hex struktura • ${best.count} ks • rozteč ${best.pitchM.toFixed(2)} m • referenční geometrie`,
     family: "circular-honeycomb",
     hexShellCount: shellCount,
     designCoveragePct: circleDesignCoveragePct(room, best.placements, coverage),
@@ -3956,10 +3956,10 @@ function bestCenteredHexShell(room, coverage, speaker, shellCount) {
     clearanceM: recommendedWallClearanceMeters(coverage, room),
     isStructuredLattice: true,
     score: 0,
-    source: "ssc-geometry-benchmark",
+    source: "coverage-geometry-benchmark",
     radialScale: 1,
     removedSymmetricCount: 0,
-    sscBenchmark: best.benchmark
+    geometryBenchmark: best.benchmark
   };
 }
 
@@ -3967,7 +3967,7 @@ function buildCircularOnlyCandidates(room, coverage, speaker) {
   const candidates = [];
 
   // v0.134: kruhový režim postupuje deterministicky od nejmenšího vzoru.
-  // Každý počet je posuzován samostatně proti SSC referenci; počet se nepřebírá
+  // Každý počet je posuzován samostatně proti referenční geometrii; počet se nepřebírá
   // ze zarovnané varianty a poloměr kruhu se pro každé N optimalizuje zvlášť.
 
   // 1) Jediný reproduktor ve středu.
@@ -3993,10 +3993,10 @@ function buildCircularOnlyCandidates(room, coverage, speaker) {
 
   // 4) Než přidáme druhý prstenec, zkoušíme 1 střed + 7 až 12 na jednom kruhu.
   // Pro každý počet se poloměr optimalizuje samostatně a první konfigurace,
-  // která splní SSC benchmark, se použije.
+  // která splní referenční geometrie, se použije.
   //
   // Geometrická stop-podmínka: pokud by i při prstenci až u obvodu místnosti
-  // byla vzdálenost sousedů menší než 60 % SSC rozteče, další zahušťování
+  // byla vzdálenost sousedů menší než 60 % referenční rozteče, další zahušťování
   // jednoho prstence už nedává smysl a přecházíme na více vrstev.
   const R = room.diameterM / 2;
   const referenceSpacingM = Math.max(
@@ -4032,10 +4032,10 @@ function buildCircularOnlyCandidates(room, coverage, speaker) {
 }
 
 
-function evaluateRectangleAgainstSscReference(room, placements, coverage, speaker) {
+function evaluateRectangleAgainstCoverageReference(room, placements, coverage, speaker) {
   if (!placements?.length || room.shape !== "rectangle") return {passes:false, overallRatio:0};
 
-  const reference = buildSscCircleGeometryReference(coverage, speaker);
+  const reference = buildCoverageGeometryReference(coverage, speaker);
   const placementsM = placements.map(p => ({xM:p.x/FEET_PER_METER, yM:p.y/FEET_PER_METER}));
   const w = room.widthM;
   const l = room.lengthM;
@@ -4074,14 +4074,14 @@ function rectangleOptimizedHardGeometryCheck(room, placements, coverage) {
 
   const spacingXM = Math.max(0.05, coverage.spacingX / FEET_PER_METER);
   const spacingYM = Math.max(0.05, coverage.spacingY / FEET_PER_METER);
-  const maxSscNeighborM = Math.max(spacingXM, spacingYM);
-  // Roh referenční SSC buňky: repro je půl rozteče od obou stěn.
-  const maxSscBoundaryM = Math.hypot(spacingXM / 2, spacingYM / 2);
+  const maxReferenceNeighborM = Math.max(spacingXM, spacingYM);
+  // Roh referenční buňky: repro je půl rozteče od obou stěn.
+  const maxReferenceBoundaryM = Math.hypot(spacingXM / 2, spacingYM / 2);
   const tolerance = 1.01;
 
   const pts = placements.map(p => ({x:p.x/FEET_PER_METER, y:p.y/FEET_PER_METER}));
 
-  // Žádný reproduktor nesmí být "opuštěný" dál než dovoluje skutečná SSC rozteč.
+  // Žádný reproduktor nesmí být "opuštěný" dál než dovoluje skutečná referenční rozteč.
   let maxNearestM = 0;
   if (pts.length > 1) {
     for (let i=0; i<pts.length; i++) {
@@ -4091,14 +4091,14 @@ function rectangleOptimizedHardGeometryCheck(room, placements, coverage) {
         nearest = Math.min(nearest, Math.hypot(pts[i].x-pts[j].x, pts[i].y-pts[j].y));
       }
       maxNearestM = Math.max(maxNearestM, nearest);
-      if (nearest > maxSscNeighborM * tolerance) {
-        return {passes:false, maxNearestM, maxBoundaryNearestM:Infinity, maxSscNeighborM, maxSscBoundaryM};
+      if (nearest > maxReferenceNeighborM * tolerance) {
+        return {passes:false, maxNearestM, maxBoundaryNearestM:Infinity, maxReferenceNeighborM, maxReferenceBoundaryM};
       }
     }
   }
 
   // Samostatná tvrdá kontrola kraje: žádný bod obvodu nesmí být dál od
-  // nejbližšího repro než roh původní SSC mřížky.
+  // nejbližšího repro než roh původní referenční mřížky.
   let maxBoundaryNearestM = 0;
   const samplesPerEdge = 72;
   const boundaryPoints = [];
@@ -4115,37 +4115,37 @@ function rectangleOptimizedHardGeometryCheck(room, placements, coverage) {
     let nearest = Infinity;
     for (const p of pts) nearest = Math.min(nearest, Math.hypot(q.x-p.x, q.y-p.y));
     maxBoundaryNearestM = Math.max(maxBoundaryNearestM, nearest);
-    if (nearest > maxSscBoundaryM * tolerance) {
-      return {passes:false, maxNearestM, maxBoundaryNearestM, maxSscNeighborM, maxSscBoundaryM};
+    if (nearest > maxReferenceBoundaryM * tolerance) {
+      return {passes:false, maxNearestM, maxBoundaryNearestM, maxReferenceNeighborM, maxReferenceBoundaryM};
     }
   }
 
-  return {passes:true, maxNearestM, maxBoundaryNearestM, maxSscNeighborM, maxSscBoundaryM};
+  return {passes:true, maxNearestM, maxBoundaryNearestM, maxReferenceNeighborM, maxReferenceBoundaryM};
 }
 
 function chooseRectangleOptimizedDesign(room, coverage, speaker) {
   if (room.shape !== "rectangle") return null;
 
-  // Bezpečný základ je vždy původní SSC mřížka. Optimalizovaná varianta smí
-  // pouze UBRAT repro; pokud bezpečnější úspora neexistuje, vrátíme SSC beze změny.
-  const sscPlacements = calculatePlacements(coverage, room);
-  const sscBaseline = {
-    placements:sscPlacements.map(p => ({...p})),
-    count:sscPlacements.length,
-    method:`Původní SSC mřížka ${coverage.columns} × ${coverage.rows}`,
-    source:"rectangle-ssc-baseline",
+  // Bezpečný základ je vždy referenční pravidelná mřížka. Optimalizovaná varianta smí
+  // pouze UBRAT repro; pokud bezpečnější úspora neexistuje, vrátíme referenční mřížku beze změny.
+  const referencePlacements = calculatePlacements(coverage, room);
+  const referenceBaseline = {
+    placements:referencePlacements.map(p => ({...p})),
+    count:referencePlacements.length,
+    method:`Referenční pravidelná mřížka ${coverage.columns} × ${coverage.rows}`,
+    source:"rectangle-reference-baseline",
     alignmentWeight:4,
     isStructuredLattice:true,
     clearanceM:recommendedWallClearanceMeters(coverage, room)
   };
 
-  const baselineBenchmark = evaluateRectangleAgainstSscReference(room, sscBaseline.placements, coverage, speaker);
-  sscBaseline.sscBenchmark = baselineBenchmark;
-  sscBaseline.hardGeometry = rectangleOptimizedHardGeometryCheck(room, sscBaseline.placements, coverage);
+  const baselineBenchmark = evaluateRectangleAgainstCoverageReference(room, referenceBaseline.placements, coverage, speaker);
+  referenceBaseline.geometryBenchmark = baselineBenchmark;
+  referenceBaseline.hardGeometry = rectangleOptimizedHardGeometryCheck(room, referenceBaseline.placements, coverage);
 
-  // Hledáme pouze menší počet než má SSC. Kandidáty tvoří pravoúhlé a
+  // Hledáme pouze menší počet než má referenční mřížka. Kandidáty tvoří pravoúhlé a
   // posunuté/hex mřížky (typicky např. řady 4–3–4), nikoli volné body.
-  for (let count=1; count<sscBaseline.count; count++) {
+  for (let count=1; count<referenceBaseline.count; count++) {
     const candidates = buildLayoutCandidates(count, coverage, room, "balanced", "full")
       .filter(c => c?.isStructuredLattice !== false && c?.placements?.length === count)
       // Pro obdélník dovolujeme jen osově orientované mřížky; žádné šikmé 30/45/60° varianty.
@@ -4156,32 +4156,32 @@ function chooseRectangleOptimizedDesign(room, coverage, speaker) {
       const hardGeometry = rectangleOptimizedHardGeometryCheck(room, candidate.placements, coverage);
       if (!hardGeometry.passes) continue;
 
-      const benchmark = evaluateRectangleAgainstSscReference(room, candidate.placements, coverage, speaker);
+      const benchmark = evaluateRectangleAgainstCoverageReference(room, candidate.placements, coverage, speaker);
       if (!benchmark.passes) continue;
 
-      passing.push({...candidate, count, sscBenchmark:benchmark, hardGeometry});
+      passing.push({...candidate, count, geometryBenchmark:benchmark, hardGeometry});
     }
 
     if (passing.length) {
       passing.sort((a,b) =>
-        (b.sscBenchmark?.overallRatio||0) - (a.sscBenchmark?.overallRatio||0) ||
+        (b.geometryBenchmark?.overallRatio||0) - (a.geometryBenchmark?.overallRatio||0) ||
         (a.hardGeometry?.maxBoundaryNearestM||Infinity) - (b.hardGeometry?.maxBoundaryNearestM||Infinity) ||
         (b.alignmentWeight||0) - (a.alignmentWeight||0)
       );
       const best = passing[0];
       return {
         ...best,
-        method:`Optimalizovaná ${best.method || "mřížka"} • max. rozteče SSC`,
-        source:"rectangle-ssc-optimized"
+        method:`Optimalizovaná ${best.method || "mřížka"} • max. rozteče reference`,
+        source:"rectangle-reference-optimized"
       };
     }
   }
 
   // Optimalizace nikdy nesmí vyjít hůř než klasická mřížka.
   return {
-    ...sscBaseline,
-    method:`Optimalizovaná • bez bezpečné úspory, použita ${sscBaseline.method}`,
-    source:"rectangle-ssc-optimized-fallback"
+    ...referenceBaseline,
+    method:`Optimalizovaná • bez bezpečné úspory, použita ${referenceBaseline.method}`,
+    source:"rectangle-reference-optimized-fallback"
   };
 }
 
@@ -4199,7 +4199,7 @@ function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned
   // Each mode finds its own minimum safe count. Quality metrics only break ties.
   candidates.sort((a,b) =>
     a.count - b.count ||
-    b.sscBenchmark.overallRatio - a.sscBenchmark.overallRatio ||
+    b.geometryBenchmark.overallRatio - a.geometryBenchmark.overallRatio ||
     b.designCoveragePct - a.designCoveragePct ||
     a.geometryScore - b.geometryScore
   );
@@ -4207,16 +4207,16 @@ function chooseCircleCoverageDesign(room, coverage, circleMode = "circle-aligned
   return candidates[0];
 }
 
-function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
+function getRegularAutomaticLayout(basePlacements, coverage, room) {
   const clearanceM = recommendedWallClearanceMeters(coverage, room);
 
-  // Rekonstrukce původního SSC principu:
-  // 1) coverage diameter z výšky a vyzařovacího úhlu
+  // Referenční princip pravidelné mřížky:
+  // 1) průměr pokrytí z výšky a vyzařovacího úhlu
   // 2) target spacing podle zvoleného overlap / ±dB režimu
   // 3) ceil(width/spacing) × ceil(length/spacing)
   // 4) body ve středech jednotlivých buněk.
   //
-  // Pro obdélník je to přímo původní SSC mřížka.
+  // Pro obdélník je to přímo referenční pravidelná mřížka.
   // Pro naše rozšířené tvary (kruh, výřezy) použijeme tutéž mřížku
   // a pouze vynecháme body ležící mimo skutečnou plochu.
   return {
@@ -4224,7 +4224,7 @@ function getSscRegularAutomaticLayout(basePlacements, coverage, room) {
     method:
       room.shape === "rectangle"
         ? `Pevná mřížka ${coverage.columns} × ${coverage.rows}`
-        : "Pevná SSC mřížka X/Y oříznutá tvarem místnosti",
+        : "Pevná pravidelná mřížka X/Y oříznutá tvarem místnosti",
     clearanceM,
     alignmentWeight: 3,
     acoustic: null,
@@ -4762,7 +4762,7 @@ function calculatePower({speaker, targetSPL, ambientNoise, useCase, voltage}, co
   const distanceLoss = 20 * Math.log10(coverage.listenerDistance / SPL_REFERENCE_DISTANCE_FT);
   const arrayGain = 10 * Math.log10(Math.max(1, coverage.count));
 
-  // Stejná logika jako SSC: potřebný tap zohledňuje cílové SPL,
+  // Referenční výpočet: potřebný tap zohledňuje cílové SPL,
   // headroom, citlivost, nominální vzdálenost a počet repro.
   const requiredTap = Math.pow(
     10,
@@ -4830,7 +4830,7 @@ function createSplKernel({listenerHeightFt, placements, mountingHeightFt, speake
   const dz2 = dz * dz;
   const minDistance2 = MIN_LISTENER_DISTANCE_FT * MIN_LISTENER_DISTANCE_FT;
   const referenceDistance2 = SPL_REFERENCE_DISTANCE_FT * SPL_REFERENCE_DISTANCE_FT;
-  // Matematicky shodné s původním SSC-style SPL vztahem, pouze bez opakovaných
+  // Matematicky shodný referenční SPL vztah, pouze bez opakovaných
   // sqrt/log/pow operací pro každý reproduktor a každý bod heatmapy.
   const sourceIntensityAtReference = Math.pow(10, speaker.sensitivity / 10) * Math.max(tap, 1e-12);
   return {
@@ -4858,7 +4858,7 @@ function calculateSPLAtPoint({xFt, yFt, listenerHeightFt, placements, mountingHe
 }
 
 
-function calculateSPLStatsLikeSSC({
+function calculateSPLStatsReference({
   lengthFt,
   widthFt,
   placements,
@@ -5472,7 +5472,7 @@ function drawSectionView({
 
   const halfAngleRad = Math.max(1, Math.min(179, speaker.coverageAngle)) * Math.PI / 360;
   const verticalDistanceToEarM = Math.max(0.05, mountHeightM - listenerHeightM);
-  // Pro nominální kužel v řezu kreslíme vyzařování až k podlaze, stejně jako SSC.
+  // Pro nominální kužel v řezu kreslíme vyzařování až k podlaze.
   // Rovina uší zůstává jen jako referenční linka, nikoli jako ukončení kuželu.
   const verticalDistanceToFloorM = Math.max(0.05, mountHeightM);
   const halfCoverageAtFloorM = Math.tan(halfAngleRad) * verticalDistanceToFloorM;
@@ -6600,7 +6600,7 @@ function calculate() {
   } else if (room.shape === "rectangle" && placementOptimizationMode === "rect-optimized") {
     const rectDesign = chooseRectangleOptimizedDesign(room, coverage, speaker);
     if (!rectDesign?.placements?.length) {
-      alert("Pro obdélník se nepodařilo vytvořit optimalizované rozmístění podle SSC benchmarku.");
+      alert("Pro obdélník se nepodařilo vytvořit optimalizované rozmístění podle referenční geometrieu.");
       return;
     }
     recommendedCount = rectDesign.placements.length;
@@ -6608,30 +6608,30 @@ function calculate() {
     selectedLayout = rectDesign;
     countRecommendation = {
       recommendedCount, chosen:rectDesign, evaluated:[], toleranceFloor:null,
-      targetMet:null, source:"rectangle-ssc-optimized", optimizationPolicy:null
+      targetMet:null, source:"rectangle-reference-optimized", optimizationPolicy:null
     };
   } else {
-    const sscLayout = getSscRegularAutomaticLayout(
+    const referenceLayout = getRegularAutomaticLayout(
       basePlacements,
       coverage,
       room
     );
 
-    recommendedCount = sscLayout.placements.length;
+    recommendedCount = referenceLayout.placements.length;
     selectedCount = recommendedCount;
 
-    // v0.133: pro všechny nekruhové tvary je geometrie pevná podle SSC.
+    // v0.133: pro všechny nekruhové tvary je geometrie pevná podle referenční geometrie.
     // U L/U/výřezů se pouze vynechají body ležící mimo skutečnou plochu;
     // žádný následný optimizer už body neposouvá ani nezvětšuje rozteče.
-    selectedLayout = sscLayout;
+    selectedLayout = referenceLayout;
 
     countRecommendation = {
       recommendedCount,
-      chosen:sscLayout,
+      chosen:referenceLayout,
       evaluated:[],
       toleranceFloor:null,
       targetMet:null,
-      source:"ssc",
+      source:"reference-grid",
       optimizationPolicy:null
     };
   }
@@ -6799,7 +6799,7 @@ function calculate() {
       );
   } else {
     document.getElementById("technicalToleranceGoalValue").textContent =
-      `Počet dle SSC coverage pro ±${toleranceDb} dB: ${recommendedCount} ks • optimalizace mění pouze polohy`;
+      `Počet dle geometrické pokrytí pro ±${toleranceDb} dB: ${recommendedCount} ks • optimalizace mění pouze polohy`;
   }
 
   document.getElementById("recommendedModelValue").textContent = recommendedSpeaker.model;
@@ -6894,7 +6894,7 @@ function calculate() {
   document.getElementById("technicalRecommendedCountValue").textContent =
     room.shape === "circle"
       ? `${recommendedCount} ks – geometrické coverage vyplnění kruhu`
-      : `${recommendedCount} ks – SSC coverage`;
+      : `${recommendedCount} ks – geometrické pokrytí`;
 
   document.getElementById("technicalSelectedCountValue").textContent =
     `${effectiveCoverage.count} ks – automatický návrh`;
